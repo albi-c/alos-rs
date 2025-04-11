@@ -1,5 +1,6 @@
 use crate::print;
 
+#[allow(unused)]
 pub enum LogLevel {
     Debug,
     Info,
@@ -28,32 +29,39 @@ impl<'a> Logger<'a> {
 
 #[macro_export]
 macro_rules! debug {
-    ($logger:expr, $($arg:tt)*) => {
-        $logger._header($crate::log::LogLevel::Debug, );
+    ($($arg:tt)*) => {
+        LOG._header($crate::log::LogLevel::Debug);
         $crate::println!($($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! info {
-    ($logger:expr, $($arg:tt)*) => {
-        $logger._header($crate::log::LogLevel::Info, );
+    ($($arg:tt)*) => {
+        LOG._header($crate::log::LogLevel::Info);
         $crate::println!($($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! warning {
-    ($logger:expr, $($arg:tt)*) => {
-        $logger._header($crate::log::LogLevel::Warning, );
+    ($($arg:tt)*) => {
+        LOG._header($crate::log::LogLevel::Warning);
         $crate::println!($($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! error {
-    ($logger:expr, $($arg:tt)*) => {
-        $logger._header($crate::log::LogLevel::Error, );
+    ($($arg:tt)*) => {
+        LOG._header($crate::log::LogLevel::Error);
         $crate::println!($($arg)*);
+    };
+}
+
+#[macro_export]
+macro_rules! logger {
+    ($name:expr) => {
+        static LOG: $crate::log::Logger = $crate::log::Logger::new($name);
     };
 }

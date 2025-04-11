@@ -136,6 +136,19 @@ run-bios: $(IMAGE_NAME).iso
 		-boot d \
 		$(QEMUFLAGS)
 
+.PHONY: debug-bios
+debug-bios: $(IMAGE_NAME).iso
+	qemu-system-$(KARCH) \
+		-M q35 \
+		-cdrom $(IMAGE_NAME).iso \
+		-boot d \
+		-s -S -no-reboot -no-shutdown -d cpu_reset,int \
+		$(QEMUFLAGS)
+
+.PHONY: gdb
+gdb:
+	gdb -x debug.gdb
+
 .PHONY: run-hdd-bios
 run-hdd-bios: $(IMAGE_NAME).hdd
 	qemu-system-$(KARCH) \

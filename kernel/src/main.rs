@@ -5,12 +5,12 @@ mod drivers;
 mod ports;
 mod print;
 mod log;
+mod gdt;
 
 use core::arch::asm;
 
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
-use crate::log::Logger;
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -27,7 +27,7 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[unsafe(link_section = ".requests_end_marker")]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
-static LOG: Logger = Logger::new("Kernel");
+logger!("Kernel");
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
@@ -49,10 +49,9 @@ unsafe extern "C" fn kmain() -> ! {
         }
     }
 
-    debug!(LOG, "{}", 1);
-    info!(LOG, "{}", 1);
-    warning!(LOG, "{}", 1);
-    error!(LOG, "{}", 1);
+    info!("a");
+    
+    gdt::init();
 
     hcf();
 }

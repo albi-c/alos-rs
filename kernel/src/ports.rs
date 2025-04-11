@@ -16,6 +16,7 @@ impl Drop for Port {
     }
 }
 
+#[allow(unused)]
 impl Port {
     const fn new(start: u16, length: u16) -> Self {
         Port { start, length }
