@@ -1,8 +1,8 @@
 use core::arch::asm;
 
-#[repr(packed)]
 #[derive(Copy, Clone)]
 #[allow(unused)]
+#[repr(packed)]
 struct GDT {
     limit1: u16,
     base1: u16,
@@ -29,8 +29,9 @@ impl GDT {
     }
 }
 
-#[repr(packed)]
 #[derive(Copy, Clone)]
+#[allow(unused)]
+#[repr(packed)]
 struct Info {
     size: u16,
     gdt: *const GDT,
@@ -62,21 +63,24 @@ impl Info {
         info
     }
 
-    unsafe fn set_with_segments(&self) {
+    unsafe fn set_with_segments(&self, ss: usize, cs: usize) {
         unsafe {
             asm!(
-                "lgdt [rax]",
+                "lgdt [rdi]",
                 "cli",
-                "mov rax, rsp",
-                "push 0x30",
-                "push rax",
+                "mov rdi, rsp",
+                "push rsi",
+                "push rdi",
                 "pushf",
                 "or qword ptr [rsp], 0x200",
-                "push 0x28",
-                "push 2f",
+                "push rdx",
+                "lea rdi, [2f]",
+                "push rdi",
                 "iretq",
                 "2:",
-                in("rax") self as *const Info,
+                in("rdi") self as *const Info,
+                in("rsi") ss,
+                in("rdx") cs,
             )
         }
     }
@@ -86,19 +90,21 @@ impl Info {
     }
 }
 
-static mut CORE_0_GDT: [GDT; 11] = [GDT::default(); 11];
+static mut CORE_0_GDT: [GDT; 7] = [GDT::default(); 7];
 
 pub fn init() {
-    let old_gdt = Info::get();
+    let info = Info::get();
+    unsafe {
+        info.set_with_segments(0x30, 0x28);
+    };
 
     unsafe {
-        CORE_0_GDT[0..7].copy_from_slice(&old_gdt.as_slice()[0..7]);
-        CORE_0_GDT[7..9].copy_from_slice(&old_gdt.as_slice()[5..7]);
-        CORE_0_GDT[7].access |= 3 << 5;
-        CORE_0_GDT[8].access |= 3 << 5;
-        core::mem::swap(&mut CORE_0_GDT[7], &mut CORE_0_GDT[8]);
+        CORE_0_GDT[1] = GDT::new(0, 0xfffff, 0x9b, 0xa);
+        CORE_0_GDT[2] = GDT::new(0, 0xfffff, 0x93, 0xc);
+        CORE_0_GDT[3] = GDT::new(0, 0xfffff, 0xfb, 0xa);
+        CORE_0_GDT[4] = GDT::new(0, 0xfffff, 0xf3, 0xc);
         #[allow(static_mut_refs)]
         let info = Info::new(&CORE_0_GDT);
-        info.set_with_segments();
+        info.set_with_segments(0x10, 0x8);
     };
 }

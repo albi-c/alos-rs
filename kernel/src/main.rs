@@ -31,6 +31,8 @@ logger!("Kernel");
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
+    cli();
+
     assert!(BASE_REVISION.is_supported());
 
     if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
@@ -49,7 +51,7 @@ unsafe extern "C" fn kmain() -> ! {
         }
     }
 
-    info!("a");
+    info!("b");
     
     gdt::init();
 
@@ -61,7 +63,14 @@ fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
     hcf();
 }
 
+fn cli() {
+    unsafe {
+        asm!("cli");
+    }
+}
+
 fn hcf() -> ! {
+    cli();
     loop {
         unsafe {
             #[cfg(target_arch = "x86_64")]
