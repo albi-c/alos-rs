@@ -1,0 +1,141 @@
+use core::arch::asm;
+use macros::{interrupt_handlers, interrupt_handlers_arr};
+use crate::cpu;
+use crate::ports::Port;
+
+#[derive(Debug)]
+#[allow(unused)]
+#[repr(C, align(16))]
+struct IdtEntry {
+    offset_1: u16,
+    selector: u16,
+    ist: u8,
+    type_attr: u8,
+    offset_2: u16,
+    offset_3: u32,
+    zero: u32,
+}
+
+impl IdtEntry {
+    fn new(offset: u64, trap: bool) -> Self {
+        IdtEntry {
+            offset_1: offset as u16,
+            selector: 0x28,
+            ist: 0x0,
+            type_attr: if trap { 0x8f } else { 0x8e },
+            offset_2: (offset >> 16) as u16,
+            offset_3: (offset >> 32) as u32,
+            zero: 0x0,
+        }
+    }
+}
+
+#[derive(Debug)]
+#[allow(unused)]
+#[repr(packed)]
+struct Info {
+    size: u16,
+    idt: *const IdtEntry,
+}
+
+impl Info {
+    fn new(idt: &[IdtEntry]) -> Self {
+        Info {
+            size: (idt.len() * size_of::<IdtEntry>()) as u16 - 1,
+            idt: idt.as_ptr(),
+        }
+    }
+
+    unsafe fn set(&self) {
+        unsafe {
+            asm!(
+                "lidt [{0}]",
+                in(reg) self as *const Info,
+            );
+        }
+    }
+}
+
+type AsmHandler = unsafe extern "C" fn() -> ();
+
+#[derive(Debug, Clone)]
+pub struct IrqContext {
+    pub irq: u16,
+    pub flags: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExcContext {
+    pub exc: u16,
+    pub error: u64,
+    pub address: u64,
+    pub instruction: u64,
+    pub user: bool,
+    pub flags: u64,
+}
+
+pub type IrqHandler = fn(IrqContext) -> ();
+pub type ExcHandler = fn(ExcContext) -> ();
+
+static mut IDT: [IdtEntry; 256] = unsafe { core::mem::zeroed() };
+static mut HANDLERS: [u64; 256] = unsafe { core::mem::zeroed() };
+static mut HANDLERS_REPLACEABLE: [bool; 256] = unsafe { core::mem::zeroed() };
+
+static mut ASM_IRQ_HANDLER_TABLE: [u64; 256] = unsafe { core::mem::zeroed() };
+interrupt_handlers!();
+
+fn default_irq_handler(_: IrqContext) {}
+fn default_exc_handler(_: ExcContext) {}
+
+extern "C" fn irq_handler(irq: u16, flags: u64) {
+    let ctx = IrqContext {
+        irq,
+        flags,
+    };
+    (unsafe { core::mem::transmute::<_, IrqHandler>(HANDLERS[irq as usize]) })(ctx);
+}
+extern "C" fn exc_handler(exc: u16, error: u64, address: u64,
+                          instruction: u64, user: bool, flags: u64) {
+    let ctx = ExcContext {
+        exc,
+        error,
+        address,
+        instruction,
+        user,
+        flags,
+    };
+    (unsafe { core::mem::transmute::<_, ExcHandler>(HANDLERS[exc as usize]) })(ctx);
+}
+
+pub fn init() {
+    unsafe {
+        ASM_IRQ_HANDLER_TABLE = interrupt_handlers_arr!();
+    }
+
+    let port1 = Port::alloc(0x20, 2)
+        .expect("Failed to allocate port 1 for interrupts");
+    let port2 = Port::alloc(0xa0, 2)
+        .expect("Failed to allocate port 2 for interrupts");
+
+    for i in  0..256 {
+        unsafe {
+            HANDLERS[i] = if i < 32 {
+                core::mem::transmute(default_exc_handler as ExcHandler)
+            } else {
+                core::mem::transmute(default_irq_handler as IrqHandler)
+            };
+
+            IDT[i] = IdtEntry::new(ASM_IRQ_HANDLER_TABLE[i], i < 32);
+        };
+    }
+
+    #[allow(static_mut_refs)]
+    unsafe { HANDLERS_REPLACEABLE.fill(true) };
+
+    #[allow(static_mut_refs)]
+    let info = unsafe { Info::new(&IDT) };
+
+    cpu::disable_interrupts();
+
+    unsafe { info.set() };
+}

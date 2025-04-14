@@ -3,7 +3,12 @@ name = "alos"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+resolver = "2"
+members = ["macros"]
+
 [dependencies]
+macros = { path = "macros" }
 limine = "0.4"
 spin = "0.10.0"
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
