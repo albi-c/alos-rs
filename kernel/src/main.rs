@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 #![feature(naked_functions)]
+#![feature(maybe_uninit_array_assume_init)]
+#![feature(const_array_as_mut_slice)]
+extern crate alloc;
 
 mod drivers;
 mod ports;

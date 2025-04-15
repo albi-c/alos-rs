@@ -1,5 +1,6 @@
 mod allocator;
 pub mod buddy_allocator;
+mod effects_test;
 
 use core::cmp::{max, min};
 use limine::memory_map::{Entry, EntryType};
@@ -16,6 +17,13 @@ pub struct MemoryManager<A: MemoryAllocator> {
 }
 
 impl<A: MemoryAllocator> MemoryManager<A> {
+    pub const fn default(alloc_32: A, alloc_main: A) -> Self {
+        MemoryManager {
+            alloc_32,
+            alloc_main,
+        }
+    }
+
     fn init_allocator(allocator: &mut A) {
         drop(core::mem::replace(allocator, A::new()));
     }
@@ -49,12 +57,12 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         let largest_entry = largest_entry.expect("No free memory");
         let kernel_entry = kernel_entry.expect("No kernel memory map entry");
 
-        debug!("Memory end: {} kB", memory_end << 10);
+        debug!("Memory end: {} kB", memory_end >> 10);
 
         self.alloc_32.init(0, min(1 << 32, memory_end));
         self.alloc_main.init(1 << 32, memory_end);
 
-        let allocator_data = largest_entry.base as *mut u8;
+        let allocator_data = (largest_entry.base + hhdm_offset) as *mut u8;
         let allocator_data_size = [
             &mut self.alloc_32,
             &mut self.alloc_main
@@ -64,7 +72,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
             off + size
         });
 
-        debug!("Allocator data size: {} kB", allocator_data_size << 10);
+        debug!("Allocator data size: {} kB", allocator_data_size >> 10);
         assert!(allocator_data_size < largest_entry.length, "Not enough memory for allocator data");
     }
 }

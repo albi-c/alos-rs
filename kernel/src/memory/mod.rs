@@ -18,7 +18,10 @@ static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 #[unsafe(link_section = ".requests")]
 static EXEC_ADDR_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
 
-static PMM: RwLock<MemoryManager<BuddyAllocator<9>>> = RwLock::new(unsafe { core::mem::zeroed() });
+static PMM: RwLock<MemoryManager<BuddyAllocator<9>>> = RwLock::new(MemoryManager::default(
+    BuddyAllocator::default(),
+    BuddyAllocator::default(),
+));
 
 pub fn init() {
     let memory_map_response = MEMORY_MAP_REQUEST.get_response().expect("No memory map");
