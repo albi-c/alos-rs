@@ -34,8 +34,7 @@ fn exception_handler(ctx: interrupts::ExcContext) {
     if ctx.user {
         todo!()
     } else {
-        error!("Kernel exception: {:#?}", ctx);
-        panic!("Kernel exception: {:#?}", ctx);
+        panic!("Kernel exception: {:#x?}", ctx);
     }
 }
 fn irq_handler(ctx: interrupts::IrqContext) {
@@ -76,8 +75,6 @@ unsafe extern "C" fn kmain() -> ! {
             interrupts::attach_irq(i, irq_handler, true);
         }
     }
-
-    unsafe { core::ptr::read_volatile(16 as *const u64) };
 
     cpu::hcf();
 }

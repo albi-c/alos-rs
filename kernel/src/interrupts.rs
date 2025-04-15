@@ -21,7 +21,7 @@ impl IdtEntry {
     fn new(offset: u64, trap: bool) -> Self {
         IdtEntry {
             offset_1: offset as u16,
-            selector: 0x28,
+            selector: 0x08,
             ist: 0x0,
             type_attr: if trap { 0x8f } else { 0x8e },
             offset_2: (offset >> 16) as u16,

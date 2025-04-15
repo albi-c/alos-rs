@@ -57,7 +57,7 @@ impl ToTokens for Handler {
             .replace("?push_all", PUSH_ALL)
             .replace("?pop_all", POP_ALL)
             .replace("?out_mid", if n >= 0x28 { "out 0xa0, al" } else { "" })
-            .replace("?i", &ident.to_string());
+            .replace("?i", &n.to_string());
         tokens.extend(quote! {
             #[unsafe(no_mangle)]
             #[naked]
