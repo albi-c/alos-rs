@@ -31,7 +31,7 @@ impl<'a> Logger<'a> {
 macro_rules! debug {
     ($($arg:tt)*) => {
         LOG._header($crate::log::LogLevel::Debug);
-        $crate::println!($($arg)*);
+        $crate::println!($($arg)*)
     };
 }
 
@@ -39,7 +39,7 @@ macro_rules! debug {
 macro_rules! info {
     ($($arg:tt)*) => {
         LOG._header($crate::log::LogLevel::Info);
-        $crate::println!($($arg)*);
+        $crate::println!($($arg)*)
     };
 }
 
@@ -47,7 +47,7 @@ macro_rules! info {
 macro_rules! warning {
     ($($arg:tt)*) => {
         LOG._header($crate::log::LogLevel::Warning);
-        $crate::println!($($arg)*);
+        $crate::println!($($arg)*)
     };
 }
 
@@ -55,7 +55,7 @@ macro_rules! warning {
 macro_rules! error {
     ($($arg:tt)*) => {
         LOG._header($crate::log::LogLevel::Error);
-        $crate::println!($($arg)*);
+        $crate::println!($($arg)*)
     };
 }
 
