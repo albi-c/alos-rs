@@ -30,6 +30,18 @@ static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
 logger!("Kernel");
 
+fn exception_handler(ctx: interrupts::ExcContext) {
+    if ctx.user {
+        todo!()
+    } else {
+        error!("Kernel exception: {:#?}", ctx);
+        panic!("Kernel exception: {:#?}", ctx);
+    }
+}
+fn irq_handler(ctx: interrupts::IrqContext) {
+    debug!("IRQ: {:#?}", ctx);
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
     cpu::disable_interrupts();
@@ -56,12 +68,22 @@ unsafe extern "C" fn kmain() -> ! {
     
     gdt::init();
 
-    interrupts::init();
+    interrupts::init(0x0000);
+    for i in 0..256 {
+        if i < 32 {
+            interrupts::attach_exc(i, exception_handler, true);
+        } else{
+            interrupts::attach_irq(i, irq_handler, true);
+        }
+    }
+
+    unsafe { core::ptr::read_volatile(16 as *const u64) };
 
     cpu::hcf();
 }
 
 #[panic_handler]
-fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
+fn rust_panic(info: &core::panic::PanicInfo) -> ! {
+    error!("Kernel panic: {}", info.message());
     cpu::hcf();
 }

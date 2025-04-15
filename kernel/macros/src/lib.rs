@@ -59,8 +59,9 @@ impl ToTokens for Handler {
             .replace("?out_mid", if n >= 0x28 { "out 0xa0, al" } else { "" })
             .replace("?i", &ident.to_string());
         tokens.extend(quote! {
+            #[unsafe(no_mangle)]
             #[naked]
-            pub unsafe extern "C" fn #ident() {
+            unsafe extern "C" fn #ident() {
                 unsafe {
                     core::arch::naked_asm!(#source);
                 }

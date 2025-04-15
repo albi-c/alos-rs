@@ -1,4 +1,5 @@
 use core::arch::asm;
+use spin::Mutex;
 use macros::{interrupt_handlers, interrupt_handlers_arr};
 use crate::cpu;
 use crate::ports::Port;
@@ -79,7 +80,7 @@ pub type ExcHandler = fn(ExcContext) -> ();
 
 static mut IDT: [IdtEntry; 256] = unsafe { core::mem::zeroed() };
 static mut HANDLERS: [u64; 256] = unsafe { core::mem::zeroed() };
-static mut HANDLERS_REPLACEABLE: [bool; 256] = unsafe { core::mem::zeroed() };
+static HANDLERS_REPLACEABLE: Mutex<[bool; 256]> = Mutex::new(unsafe { core::mem::zeroed() });
 
 static mut ASM_IRQ_HANDLER_TABLE: [u64; 256] = unsafe { core::mem::zeroed() };
 interrupt_handlers!();
@@ -87,15 +88,17 @@ interrupt_handlers!();
 fn default_irq_handler(_: IrqContext) {}
 fn default_exc_handler(_: ExcContext) {}
 
-extern "C" fn irq_handler(irq: u16, flags: u64) {
+#[unsafe(no_mangle)]
+pub extern "C" fn irq_handler(irq: u16, flags: u64) {
     let ctx = IrqContext {
         irq,
         flags,
     };
     (unsafe { core::mem::transmute::<_, IrqHandler>(HANDLERS[irq as usize]) })(ctx);
 }
-extern "C" fn exc_handler(exc: u16, error: u64, address: u64,
-                          instruction: u64, user: bool, flags: u64) {
+#[unsafe(no_mangle)]
+pub extern "C" fn exc_handler(exc: u16, error: u64, address: u64,
+                              instruction: u64, user: bool, flags: u64) {
     let ctx = ExcContext {
         exc,
         error,
@@ -107,7 +110,7 @@ extern "C" fn exc_handler(exc: u16, error: u64, address: u64,
     (unsafe { core::mem::transmute::<_, ExcHandler>(HANDLERS[exc as usize]) })(ctx);
 }
 
-pub fn init() {
+pub fn init(mask: u16) {
     unsafe {
         ASM_IRQ_HANDLER_TABLE = interrupt_handlers_arr!();
     }
@@ -129,8 +132,7 @@ pub fn init() {
         };
     }
 
-    #[allow(static_mut_refs)]
-    unsafe { HANDLERS_REPLACEABLE.fill(true) };
+    HANDLERS_REPLACEABLE.lock().fill(true);
 
     #[allow(static_mut_refs)]
     let info = unsafe { Info::new(&IDT) };
@@ -138,4 +140,39 @@ pub fn init() {
     cpu::disable_interrupts();
 
     unsafe { info.set() };
+
+    port1.out_b(0, 0x11);
+    port2.out_b(0, 0x11);
+    port1.out_b(1, 0x20);
+    port2.out_b(1, 0x28);
+    port1.out_b(1, 0x04);
+    port2.out_b(1, 0x02);
+    port1.out_b(1, 0x01);
+    port2.out_b(1, 0x01);
+    port1.out_b(1, mask as u8);
+    port2.out_b(1, (mask >> 8) as u8);
+
+    cpu::enable_interrupts();
+}
+
+fn attach(irq: usize, handler: u64, replaceable: bool) -> bool {
+    let mut handlers_replaceable = HANDLERS_REPLACEABLE.lock();
+    if !handlers_replaceable[irq] {
+        false
+    } else {
+        handlers_replaceable[irq] = replaceable;
+        unsafe {
+            HANDLERS[irq] = handler;
+        }
+        true
+    }
+}
+
+pub fn attach_irq(irq: u16, handler: IrqHandler, replaceable: bool) -> bool {
+    assert!(irq >= 32, "Interrupts below ID 32 are exceptions");
+    attach(irq as usize, unsafe { core::mem::transmute(handler) }, replaceable)
+}
+pub fn attach_exc(exc: u16, handler: ExcHandler, replaceable: bool) -> bool {
+    assert!(exc < 32, "Interrupts from ID 32 are not exceptions");
+    attach(exc as usize, unsafe { core::mem::transmute(handler) }, replaceable)
 }
