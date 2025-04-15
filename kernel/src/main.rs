@@ -9,9 +9,11 @@ mod log;
 mod gdt;
 mod interrupts;
 mod cpu;
+mod memory;
 
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
+use crate::drivers::pit;
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -75,6 +77,9 @@ unsafe extern "C" fn kmain() -> ! {
             interrupts::attach_irq(i, irq_handler, true);
         }
     }
+
+    pit::init();
+    memory::init();
 
     cpu::hcf();
 }
