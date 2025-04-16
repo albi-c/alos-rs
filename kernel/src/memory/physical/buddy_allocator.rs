@@ -13,10 +13,10 @@ const PAGE_DATA_MASK: usize = (1 << PAGE_DATA_SHIFT) - 1;
 pub struct BuddyAllocator<const N: usize> {
     data: *mut u8,
     buddies: [&'static mut [PageData]; N],
-    page_data_size: u64,
-    num_page_data_elements: u64,
-    start_page: u64,
-    end_page: u64,
+    page_data_size: usize,
+    num_page_data_elements: usize,
+    start_page: usize,
+    end_page: usize,
     enabled: bool,
 }
 
@@ -60,7 +60,7 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         }
     }
 
-    fn init(&mut self, start: u64, end: u64) {
+    fn init(&mut self, start: usize, end: usize) {
         let start = address::page_align_up(start) >> PAGE_SHIFT;
         let end = address::page_align_down(end) >> PAGE_SHIFT;
 
@@ -76,25 +76,25 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         self.page_data_size = (num_pages >> 2) + 1;
         self.num_page_data_elements = num_pages >> (3 + PAGE_DATA_SHIFT);
     }
-    fn data_size(&self) -> u64 {
+    fn data_size(&self) -> usize {
         self.page_data_size
     }
     fn set_data(&mut self, data: *mut u8) {
         self.data = data;
         let mut data = unsafe {
             core::slice::from_raw_parts_mut(data as *mut PageData,
-                                            self.num_page_data_elements as usize)
+                                            self.num_page_data_elements)
         };
         data.fill(0xff);
 
         for i in 0..N {
             let (buddy, rest) = data.split_at_mut(
-                self.num_page_data_elements as usize >> (i + 1));
+                self.num_page_data_elements >> (i + 1));
             data = rest;
             self.buddies[i] = buddy;
         }
     }
-    fn include(&mut self, start: u64, end: u64) {
+    fn include(&mut self, start: usize, end: usize) {
         if !self.enabled {
             return;
         }
@@ -108,35 +108,82 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
 
         let start = max(start, self.end_page);
         let end = min(end, self.start_page);
+
+        let start_offset = start - self.start_page;
+        let end_offset = end - self.start_page;
+
+        for i in start_offset..end_offset {
+            self.alloc_rec_unset(0, i);
+        }
+
+        self.alloc_rec_set(0, start_offset);
+        self.alloc_rec_set(0, end_offset);
     }
 }
 
 impl <const N: usize> BuddyAllocator<N> {
     #[inline]
+    fn alloc_get(&mut self, level: usize, i: usize) -> bool {
+        self.buddies[level][i >> PAGE_DATA_SHIFT] & (1 << (i & PAGE_DATA_MASK)) != 0
+    }
+
+    #[inline]
+    fn _alloc_modify_n(&mut self, level: usize, mut i: usize, mut n: usize,
+                       start_end: impl Fn(&mut Self, usize, usize) -> (), overwrite: PageData) {
+        while i & PAGE_DATA_MASK != 0 && n > 0 {
+            start_end(self, level, i);
+            i += 1;
+            n -= 1;
+        }
+
+        // while n >= PAGE_DATA_SIZE {
+        //     self.buddies[level][i >> PAGE_DATA_SHIFT] = overwrite;
+        //     i += PAGE_DATA_SIZE;
+        //     n -= PAGE_DATA_SIZE;
+        // }
+
+        let idx = i >> PAGE_DATA_SHIFT;
+        self.buddies[level][idx..idx + (n >> PAGE_DATA_SHIFT)].fill(overwrite);
+        let n1 = n;
+        n &= PAGE_DATA_MASK;
+        i += n1 - n;
+
+        while n > 0 {
+            start_end(self, level, i);
+            i += 1;
+            n -= 1;
+        }
+    }
+
+    #[inline]
     fn alloc_set(&mut self, level: usize, i: usize) {
         self.buddies[level][i >> PAGE_DATA_SHIFT] |= 1 << (i & PAGE_DATA_MASK);
+    }
+    fn alloc_set_n(&mut self, level: usize, i: usize, n: usize) {
+        self._alloc_modify_n(level, i, n, Self::alloc_set, PAGE_DATA_FULL);
+    }
+
+    fn alloc_rec_set(&mut self, level: usize, i: usize) {
+        self.alloc_set(level, i);
+
+        for o in 1..=level {
+            self.alloc_set_n(level - o, i << o, 1 << o);
+        }
+
+        for o in 1..N-level {
+            if self.alloc_get(level - o, i >> o) {
+                break;
+            }
+            self.alloc_set(level - o, i >> o);
+        }
     }
 
     #[inline]
     fn alloc_unset(&mut self, level: usize, i: usize) {
         self.buddies[level][i >> PAGE_DATA_SHIFT] &= !(1 << (i & PAGE_DATA_MASK));
     }
-    fn alloc_unset_n(&mut self, level: usize, mut i: usize, mut n: usize) {
-        while i & PAGE_DATA_MASK != 0 && n > 0 {
-            self.alloc_unset(level, i);
-            i += 1;
-            n -= 1;
-        }
-        while n >= PAGE_DATA_SIZE {
-            self.buddies[level][i >> PAGE_DATA_SHIFT] = PAGE_DATA_FULL;
-            i += PAGE_DATA_SIZE;
-            n -= PAGE_DATA_SIZE;
-        }
-        while n > 0 {
-            self.alloc_unset(level, i);
-            i += 1;
-            n -= 1;
-        }
+    fn alloc_unset_n(&mut self, level: usize, i: usize, n: usize) {
+        self._alloc_modify_n(level, i, n, Self::alloc_unset, 0);
     }
 
     fn alloc_rec_unset(&mut self, level: usize, i: usize) {
@@ -145,7 +192,12 @@ impl <const N: usize> BuddyAllocator<N> {
         for o in 1..=level {
             self.alloc_unset_n(level - o, i << o, 1 << o);
         }
-        
-        
+
+        for o in 1..N-level {
+            self.alloc_unset(level + o, i >> o);
+            if self.alloc_get(level + o - 1, (i >> (o - 1)) ^ 1) {
+                break;
+            }
+        }
     }
 }

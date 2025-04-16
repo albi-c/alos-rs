@@ -1,6 +1,5 @@
 mod allocator;
 pub mod buddy_allocator;
-mod effects_test;
 
 use core::cmp::{max, min};
 use limine::memory_map::{Entry, EntryType};
@@ -42,7 +41,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
             match entry.entry_type {
                 EntryType::USABLE => {
                     debug!("Free memory block [{} | {} kB]", entry.base >> 10, entry.length >> 10);
-                    memory_end = max(memory_end, entry.base + entry.length);
+                    memory_end = max(memory_end, (entry.base + entry.length) as usize);
                     if entry.length > largest_entry.map(|e| e.length).unwrap_or(0) {
                         largest_entry = Some(entry);
                     }
@@ -66,13 +65,19 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         let allocator_data_size = [
             &mut self.alloc_32,
             &mut self.alloc_main
-        ].into_iter().fold(0u64, |off, alloc| {
+        ].into_iter().fold(0, |off, alloc| {
             let size = address::page_align_up(alloc.data_size());
             alloc.set_data(unsafe { allocator_data.offset(off as isize) });
             off + size
         });
 
         debug!("Allocator data size: {} kB", allocator_data_size >> 10);
-        assert!(allocator_data_size < largest_entry.length, "Not enough memory for allocator data");
+        assert!(allocator_data_size < largest_entry.length as usize,
+                "Not enough memory for allocator data in the largest block");
+
+        let kernel_pages = address::page_count_up(kernel_entry.length as usize);
+        debug!("Kernel size: {} kB ({} pages)",
+            (kernel_pages << address::PAGE_SHIFT) >> 10, kernel_pages);
+        assert!(kernel_pages <= 512, "Kernel size exceeded 2048 kB");
     }
 }
