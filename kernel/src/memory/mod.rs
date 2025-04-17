@@ -1,5 +1,6 @@
 mod physical;
 pub mod address;
+pub mod hhdm;
 
 use limine::request::{ExecutableAddressRequest, HhdmRequest, MemoryMapRequest};
 use spin::RwLock;

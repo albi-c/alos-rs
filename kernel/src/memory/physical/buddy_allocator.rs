@@ -79,10 +79,11 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
     fn data_size(&self) -> usize {
         self.page_data_size
     }
-    fn set_data(&mut self, data: *mut u8) {
-        self.data = data;
+    fn set_data(&mut self, data: &mut [u8]) {
+        assert!(data.len() >= self.data_size());
+        self.data = data.as_mut_ptr();
         let mut data = unsafe {
-            core::slice::from_raw_parts_mut(data as *mut PageData,
+            core::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut PageData,
                                             self.num_page_data_elements)
         };
         data.fill(0xff);
@@ -122,7 +123,7 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
 }
 
 impl <const N: usize> BuddyAllocator<N> {
-    #[inline]
+    #[inline(always)]
     fn alloc_get(&mut self, level: usize, i: usize) -> bool {
         self.buddies[level][i >> PAGE_DATA_SHIFT] & (1 << (i & PAGE_DATA_MASK)) != 0
     }
@@ -155,7 +156,7 @@ impl <const N: usize> BuddyAllocator<N> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn alloc_set(&mut self, level: usize, i: usize) {
         self.buddies[level][i >> PAGE_DATA_SHIFT] |= 1 << (i & PAGE_DATA_MASK);
     }
@@ -178,7 +179,7 @@ impl <const N: usize> BuddyAllocator<N> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn alloc_unset(&mut self, level: usize, i: usize) {
         self.buddies[level][i >> PAGE_DATA_SHIFT] &= !(1 << (i & PAGE_DATA_MASK));
     }

@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-#[inline]
+#[inline(always)]
 pub fn disable_interrupts() {
     unsafe {
         asm!(
@@ -9,7 +9,7 @@ pub fn disable_interrupts() {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub fn enable_interrupts() {
     unsafe {
         asm!(
