@@ -42,7 +42,7 @@ fn exception_handler(ctx: interrupts::ExcContext) {
     }
 }
 fn irq_handler(ctx: interrupts::IrqContext) {
-    debug!("IRQ: {:#?}", ctx);
+    debug!("IRQ: {:#x?}", ctx);
 }
 
 #[unsafe(no_mangle)]

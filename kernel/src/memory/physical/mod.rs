@@ -10,7 +10,7 @@ use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapRespons
 use crate::{debug, logger};
 use crate::memory::{address, hhdm};
 use crate::memory::physical::allocator::MemoryAllocator;
-use crate::memory::physical::map::MemoryMap;
+use crate::memory::physical::map::{MapEntry, MemoryMap};
 
 logger!("PMM");
 
@@ -88,6 +88,16 @@ fn map_kernel(map: &mut MemoryMap, alloc: &EarlyAllocator, source_addr: usize, p
     }
 }
 
+fn map_hhdm(map: &mut MemoryMap, alloc: &EarlyAllocator, offset: usize, large_page_count: usize) {
+    let mut iterator = map.iterate_3(offset, || alloc.allocate_map());
+
+    for i in 0..large_page_count {
+        let addr = i << address::LARGE_PAGE_SHIFT;
+        let entry = MapEntry::new(addr).write().large();
+        *iterator.next() = entry;
+    }
+}
+
 pub struct MemoryManager<A: MemoryAllocator> {
     alloc_32: A,
     alloc_main: A,
@@ -117,9 +127,12 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         let mut kernel_entry: Option<&Entry> = None;
         for entry in memory_map.entries() {
             match entry.entry_type {
+                EntryType::RESERVED | EntryType::BAD_MEMORY => {},
+                _ => memory_end = max(memory_end, (entry.base + entry.length) as usize),
+            }
+            match entry.entry_type {
                 EntryType::USABLE => {
                     debug!("Free memory block [{} | {} kB]", entry.base >> 10, entry.length >> 10);
-                    memory_end = max(memory_end, (entry.base + entry.length) as usize);
                     if entry.length > largest_entry.map(|e| e.length).unwrap_or(0) {
                         largest_entry = Some(entry);
                     }
@@ -160,11 +173,12 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         let map = early_alloc.allocate_map();
 
         map_kernel(map, &early_alloc, exec_addr.virtual_base() as usize, kernel_pages);
+        map_hhdm(map, &early_alloc, hhdm::get_offset(), address::large_page_count_up(memory_end));
 
         unsafe {
             asm!(
                 "mov cr3, {}",
-                in(reg) hhdm::sub(map.addr()),
+                in(reg) map.addr(),
             );
         }
     }

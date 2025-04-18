@@ -163,7 +163,7 @@ impl MemoryMap {
 
     #[inline(always)]
     pub fn addr(&mut self) -> usize {
-        self as *mut MemoryMap as usize
+        hhdm::sub(self as *mut MemoryMap as usize)
     }
 
     #[inline(always)]
@@ -189,7 +189,7 @@ impl MemoryMap {
     }
 
     pub fn iterate<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: usize,
-                                                         mut alloc: A) -> MemoryMapIterator<A> {
+                                                         mut alloc: A) -> MemoryMapIterator<4, A> {
         let indices = Self::get_indices(addr);
 
         let m1 = self.map_or_insert(indices[0], || alloc());
@@ -203,56 +203,59 @@ impl MemoryMap {
             has: true,
         }
     }
+
+    pub fn iterate_3<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: usize,
+                                                            mut alloc: A) -> MemoryMapIterator<3, A> {
+        let [indices @ .., _] = Self::get_indices(addr);
+
+        let m1 = self.map_or_insert(indices[0], || alloc());
+        let m2 = m1.map_or_insert(indices[1], || alloc());
+
+        MemoryMapIterator {
+            indices,
+            maps: [self, m1, m2],
+            alloc,
+            has: true,
+        }
+    }
 }
 
-pub struct MemoryMapIterator<'a, A: FnMut() -> &'static mut MemoryMap> {
-    indices: [usize; 4],
-    maps: [&'a mut MemoryMap; 4],
+pub struct MemoryMapIterator<'a, const N: usize, A: FnMut() -> &'static mut MemoryMap> {
+    indices: [usize; N],
+    maps: [&'a mut MemoryMap; N],
     alloc: A,
     has: bool,
 }
 
-impl<'a, A: FnMut() -> &'static mut MemoryMap> MemoryMapIterator<'a, A> {
-    fn increment(&mut self) -> bool {
-        self.indices[3] += 1;
-        if self.indices[3] >= 512 {
-            self.indices[3] = 0;
+impl<'a, const N: usize, A: FnMut() -> &'static mut MemoryMap> MemoryMapIterator<'a, N, A> {
+    fn increment(&mut self, idx: usize) -> bool {
+        self.indices[idx] += 1;
+        if self.indices[idx] >= 512 {
+            self.indices[idx] = 0;
 
-            self.indices[2] += 1;
-            if self.indices[2] >= 512 {
-                self.indices[2] = 0;
-
-                self.indices[1] += 1;
-                if self.indices[1] >= 512 {
-                    self.indices[1] = 0;
-
-                    self.indices[0] += 1;
-                    if self.indices[0] >= 512 {
-                        return false;
-                    }
-
-                    self.maps[1] = self.maps[0].map_or_insert(self.indices[0],
-                                                              || (self.alloc)());
+            if let Some(lower) = idx.checked_sub(1) {
+                if !self.increment(lower) {
+                    false
+                } else {
+                    self.maps[idx] = self.maps[lower].map_or_insert(self.indices[lower],
+                                                                    || (self.alloc)());
+                    true
                 }
-
-                self.maps[2] = self.maps[1].map_or_insert(self.indices[1],
-                                                          || (self.alloc)());
+            } else {
+                false
             }
-
-            self.maps[3] = self.maps[2].map_or_insert(self.indices[2],
-                                                      || (self.alloc)());
+        } else {
+            true
         }
-
-        true
     }
 
-    fn try_next(&mut self) -> Option<&mut MapEntry> {
+    pub fn try_next(&mut self) -> Option<&mut MapEntry> {
         if !self.has {
              None
         } else {
-            let idx = self.indices[3];
-            let map = self.maps[3] as *mut MemoryMap;
-            self.increment();
+            let idx = self.indices[N - 1];
+            let map = self.maps[N - 1] as *mut MemoryMap;
+            self.increment(N - 1);
             Some(unsafe { map.as_mut().unwrap() }.at(idx))
         }
     }
