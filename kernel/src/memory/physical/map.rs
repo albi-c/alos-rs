@@ -1,3 +1,4 @@
+use core::arch::asm;
 use crate::memory::hhdm;
 
 #[derive(Debug, Copy, Clone)]
@@ -144,6 +145,26 @@ impl MemoryMap {
         }
     }
 
+    pub fn get_current() -> &'static mut Self {
+        let addr: usize;
+        unsafe {
+            asm!(
+                "mov {}, cr3",
+                out(reg) addr,
+            );
+            hhdm::as_mut_ref(addr)
+        }
+    }
+
+    pub unsafe fn set_current(&mut self) {
+        unsafe {
+            asm!(
+                "mov cr3, {}",
+                in(reg) self as *mut MemoryMap,
+            );
+        }
+    }
+
     #[inline]
     pub fn get_index(addr: usize, level: u8) -> usize {
         (addr >> (12 + 9 * (level - 1))) & 0x1ff
@@ -255,7 +276,7 @@ impl<'a, const N: usize, A: FnMut() -> &'static mut MemoryMap> MemoryMapIterator
         } else {
             let idx = self.indices[N - 1];
             let map = self.maps[N - 1] as *mut MemoryMap;
-            self.increment(N - 1);
+            self.has = self.increment(N - 1);
             Some(unsafe { map.as_mut().unwrap() }.at(idx))
         }
     }

@@ -2,7 +2,6 @@ mod allocator;
 pub mod buddy_allocator;
 mod map;
 
-use core::arch::asm;
 use core::cell::Cell;
 use core::cmp::{max, min};
 use limine::memory_map::{Entry, EntryType};
@@ -66,21 +65,10 @@ impl EarlyAllocator {
     }
 }
 
-fn get_current_map() -> &'static mut MemoryMap {
-    let addr: usize;
-    unsafe {
-        asm!(
-            "mov {}, cr3",
-            out(reg) addr,
-        );
-        hhdm::as_mut_ref(addr)
-    }
-}
-
 fn map_kernel(map: &mut MemoryMap, alloc: &EarlyAllocator, source_addr: usize, page_count: usize) {
     let mut iterator = map.iterate(source_addr, || alloc.allocate_map());
 
-    let curr_map = get_current_map();
+    let curr_map = MemoryMap::get_current();
     let mut curr_iterator = curr_map.iterate(source_addr, || alloc.allocate_map());
 
     for _ in 0..page_count {
@@ -175,11 +163,6 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         map_kernel(map, &early_alloc, exec_addr.virtual_base() as usize, kernel_pages);
         map_hhdm(map, &early_alloc, hhdm::get_offset(), address::large_page_count_up(memory_end));
 
-        unsafe {
-            asm!(
-                "mov cr3, {}",
-                in(reg) map.addr(),
-            );
-        }
+        unsafe { map.set_current() };
     }
 }
