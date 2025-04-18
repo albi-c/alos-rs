@@ -2,6 +2,8 @@ mod allocator;
 pub mod buddy_allocator;
 mod map;
 
+use core::arch::asm;
+use core::cell::Cell;
 use core::cmp::{max, min};
 use limine::memory_map::{Entry, EntryType};
 use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse};
@@ -13,37 +15,37 @@ use crate::memory::physical::map::MemoryMap;
 logger!("PMM");
 
 struct EarlyAllocator {
-    memory: *mut u8,
+    memory: Cell<*mut u8>,
     start_length: usize,
-    length: usize,
+    length: Cell<usize>,
 }
 
 impl EarlyAllocator {
     pub fn new(memory: *mut u8, length: usize) -> Self {
         EarlyAllocator {
-            memory,
+            memory: Cell::new(memory),
             start_length: length,
-            length,
+            length: Cell::new(length),
         }
     }
 
     pub fn used(&self) -> usize {
-        self.start_length - self.length
+        self.start_length - self.length.get()
     }
 
-    pub fn allocate_bytes(&mut self, size: usize) -> Option<&'static mut [u8]> {
+    pub fn allocate_bytes(&self, size: usize) -> Option<&'static mut [u8]> {
         let size = address::page_align_up(size);
-        if size > self.length {
+        if size > self.length.get() {
             None
         } else {
-            self.length -= size;
-            let slice = unsafe { core::slice::from_raw_parts_mut(self.memory, size) };
-            self.memory = unsafe { self.memory.offset(size as isize) };
+            self.length.set(self.length.get() - size);
+            let slice = unsafe { core::slice::from_raw_parts_mut(self.memory.get(), size) };
+            self.memory.set(unsafe { self.memory.get().offset(size as isize) });
             Some(slice)
         }
     }
 
-    pub fn allocate<T>(&mut self, data: T) -> Option<&'static mut T> {
+    pub fn allocate<T>(&self, data: T) -> Option<&'static mut T> {
         self.allocate_bytes(size_of::<T>()).map(|mem| {
             let mem = unsafe { (mem.as_mut_ptr() as *mut T).as_mut() }.unwrap();
             drop(core::mem::replace(mem, data));
@@ -51,7 +53,7 @@ impl EarlyAllocator {
         })
     }
 
-    pub fn allocate_zeroed<T>(&mut self) -> Option<&'static mut T> {
+    pub fn allocate_zeroed<T>(&self) -> Option<&'static mut T> {
         self.allocate_bytes(size_of::<T>()).map(|mem| {
             let mem = unsafe { (mem.as_mut_ptr() as *mut T).as_mut() }.unwrap();
             drop(core::mem::replace(mem, unsafe { core::mem::zeroed() }));
@@ -59,16 +61,30 @@ impl EarlyAllocator {
         })
     }
 
-    pub fn allocate_map(&mut self) -> &'static mut MemoryMap {
+    pub fn allocate_map(&self) -> &'static mut MemoryMap {
         self.allocate_zeroed().expect("Not enough memory for memory map")
     }
 }
 
-fn map_kernel(map: &mut MemoryMap, alloc: &mut EarlyAllocator, source_addr: usize, page_count: usize) {
-    let iterator = map.iterate(source_addr, || alloc.allocate_map());
+fn get_current_map() -> &'static mut MemoryMap {
+    let addr: usize;
+    unsafe {
+        asm!(
+            "mov {}, cr3",
+            out(reg) addr,
+        );
+        hhdm::as_mut_ref(addr)
+    }
+}
+
+fn map_kernel(map: &mut MemoryMap, alloc: &EarlyAllocator, source_addr: usize, page_count: usize) {
+    let mut iterator = map.iterate(source_addr, || alloc.allocate_map());
+
+    let curr_map = get_current_map();
+    let mut curr_iterator = curr_map.iterate(source_addr, || alloc.allocate_map());
 
     for _ in 0..page_count {
-        todo!()
+        *iterator.next() = *curr_iterator.next();
     }
 }
 
@@ -123,7 +139,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         self.alloc_32.init(0, min(1 << 32, memory_end));
         self.alloc_main.init(1 << 32, memory_end);
 
-        let mut early_alloc = EarlyAllocator::new(
+        let early_alloc = EarlyAllocator::new(
             hhdm::as_ptr(largest_entry.base as usize), largest_entry.length as usize);
 
         for alloc in [
@@ -143,6 +159,13 @@ impl<A: MemoryAllocator> MemoryManager<A> {
 
         let map = early_alloc.allocate_map();
 
-        map_kernel(map, exec_addr.virtual_base() as usize, kernel_pages);
+        map_kernel(map, &early_alloc, exec_addr.virtual_base() as usize, kernel_pages);
+
+        unsafe {
+            asm!(
+                "mov cr3, {}",
+                in(reg) hhdm::sub(map.addr()),
+            );
+        }
     }
 }

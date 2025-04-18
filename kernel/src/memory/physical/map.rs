@@ -1,3 +1,5 @@
+use crate::memory::hhdm;
+
 #[derive(Debug, Copy, Clone)]
 pub struct MapEntry(pub u64);
 
@@ -54,12 +56,15 @@ impl MapEntry {
 
     #[inline(always)]
     pub fn as_map_ptr(self) -> *mut MemoryMap {
-        self.addr() as *mut MemoryMap
+        hhdm::as_ptr(self.addr())
     }
 
     #[inline(always)]
     pub fn as_map(self) -> Option<&'static mut MemoryMap> {
-        unsafe { self.as_map_ptr().as_mut() }
+        match self.addr() {
+            0 => None,
+            addr => Some(unsafe { hhdm::as_mut_ref(addr) }),
+        }
     }
 
     #[inline(always)]
@@ -195,6 +200,7 @@ impl MemoryMap {
             indices,
             maps: [self, m1, m2, m3],
             alloc,
+            has: true,
         }
     }
 }
@@ -203,7 +209,7 @@ pub struct MemoryMapIterator<'a, A: FnMut() -> &'static mut MemoryMap> {
     indices: [usize; 4],
     maps: [&'a mut MemoryMap; 4],
     alloc: A,
-    next_item: None,
+    has: bool,
 }
 
 impl<'a, A: FnMut() -> &'static mut MemoryMap> MemoryMapIterator<'a, A> {
@@ -241,11 +247,13 @@ impl<'a, A: FnMut() -> &'static mut MemoryMap> MemoryMapIterator<'a, A> {
     }
 
     fn try_next(&mut self) -> Option<&mut MapEntry> {
-        todo!("First fetch entry, then increment")
-        if self.increment() {
-            Some(self.maps[3].at(self.indices[3]))
+        if !self.has {
+             None
         } else {
-            None
+            let idx = self.indices[3];
+            let map = self.maps[3] as *mut MemoryMap;
+            self.increment();
+            Some(unsafe { map.as_mut().unwrap() }.at(idx))
         }
     }
 
