@@ -134,6 +134,7 @@ run-bios: $(IMAGE_NAME).iso
 		-M q35 \
 		-cdrom $(IMAGE_NAME).iso \
 		-boot d \
+		-enable-kvm -cpu host,migratable=no,+invtsc,+ssse3,+sse4.1,+sse4.2,+avx,+xsave,enforce \
 		$(QEMUFLAGS)
 
 .PHONY: debug-bios

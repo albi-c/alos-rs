@@ -33,6 +33,11 @@ pub fn from_ptr<T>(ptr: *const T) -> usize {
 }
 
 #[inline(always)]
+pub fn from_ref<T>(val: &T) -> usize {
+    from_ptr(val as *const T)
+}
+
+#[inline(always)]
 pub unsafe fn as_ref<T>(addr: usize) -> &'static T {
     unsafe { &*as_ptr(addr) }
 }

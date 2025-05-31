@@ -81,7 +81,7 @@ fn map_hhdm(map: &mut MemoryMap, alloc: &EarlyAllocator, offset: usize, large_pa
 
     for i in 0..large_page_count {
         let addr = i << address::LARGE_PAGE_SHIFT;
-        let entry = MapEntry::new(addr).write().large();
+        let entry = MapEntry::new_with_flags(addr, 0).present().write().large();
         *iterator.next() = entry;
     }
 }

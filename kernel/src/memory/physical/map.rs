@@ -114,7 +114,7 @@ impl MapEntry {
     pub fn is_no_cache(self) -> bool {
         self.0 & Self::FLAG_NO_CACHE != 0
     }
-    
+
     #[inline(always)]
     pub fn no_accessed(self) -> Self {
         MapEntry(self.0 & !Self::FLAG_ACCESSED)
@@ -204,7 +204,7 @@ impl MemoryMap {
 
     #[inline(always)]
     pub fn addr(&mut self) -> usize {
-        hhdm::sub(self as *mut MemoryMap as usize)
+        hhdm::from_ref(self)
     }
 
     #[inline(always)]
@@ -214,7 +214,8 @@ impl MemoryMap {
 
     pub fn map_or_insert(&mut self, index: usize,
                          alloc: impl FnOnce() -> &'static mut MemoryMap) -> &'static mut MemoryMap {
-        self.map_or_insert_with_flags(index, MapEntry::FLAGS_DEFAULT, alloc)
+        // TODO: FLAG_USER for lower half
+        self.map_or_insert_with_flags(index, MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE, alloc)
     }
 
     pub fn map_or_insert_with_flags(&mut self, index: usize, flags: u64,
