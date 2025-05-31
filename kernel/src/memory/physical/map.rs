@@ -13,6 +13,8 @@ impl MapEntry {
     pub const FLAG_USER: u64 = 1 << 2;
     pub const FLAG_WRITE_THROUGH: u64 = 1 << 3;
     pub const FLAG_NO_CACHE: u64 = 1 << 4;
+    pub const FLAG_ACCESSED: u64 = 1 << 5;
+    pub const FLAG_DIRTY: u64 = 1 << 6;
     pub const FLAG_LARGE: u64 = 1 << 7;
     pub const FLAG_NO_EXEC: u64 = 1 << 63;
 
@@ -112,6 +114,24 @@ impl MapEntry {
     pub fn is_no_cache(self) -> bool {
         self.0 & Self::FLAG_NO_CACHE != 0
     }
+    
+    #[inline(always)]
+    pub fn no_accessed(self) -> Self {
+        MapEntry(self.0 & !Self::FLAG_ACCESSED)
+    }
+    #[inline(always)]
+    pub fn is_accessed(self) -> bool {
+        self.0 & Self::FLAG_ACCESSED != 0
+    }
+
+    #[inline(always)]
+    pub fn no_dirty(self) -> Self {
+        MapEntry(self.0 & !Self::FLAG_DIRTY)
+    }
+    #[inline(always)]
+    pub fn is_dirty(self) -> bool {
+        self.0 & Self::FLAG_DIRTY != 0
+    }
 
     #[inline(always)]
     pub fn large(self) -> Self {
@@ -160,7 +180,7 @@ impl MemoryMap {
         unsafe {
             asm!(
                 "mov cr3, {}",
-                in(reg) self as *mut MemoryMap,
+                in(reg) self.addr(),
             );
         }
     }
