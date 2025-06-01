@@ -7,6 +7,10 @@ edition = "2024"
 resolver = "2"
 members = ["macros"]
 
+[features]
+default = ["smp"]
+smp = []
+
 [dependencies]
 macros = { path = "macros" }
 limine = "0.4"

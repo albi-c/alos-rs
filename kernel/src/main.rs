@@ -4,6 +4,7 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(const_array_as_mut_slice)]
 #![feature(negative_impls)]
+#![feature(unsafe_cell_access)]
 
 mod drivers;
 mod ports;
