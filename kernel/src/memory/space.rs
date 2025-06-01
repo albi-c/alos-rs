@@ -1,6 +1,6 @@
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU64, Ordering};
-use spin::rwlock::RwLock;
+use crate::lock::Lock;
 use crate::memory::physical::PhysicalMemorySpace;
 
 #[derive(Debug)]
@@ -10,8 +10,7 @@ struct MemorySpaceDataLocked {
 
 #[derive(Debug)]
 struct MemorySpaceData {
-    data: RwLock<MemorySpaceDataLocked>,
-    // TODO: use interrupt lock
+    data: Lock<MemorySpaceDataLocked>,
     ref_count: AtomicU64,
 }
 

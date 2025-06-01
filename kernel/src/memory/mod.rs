@@ -4,7 +4,7 @@ pub mod hhdm;
 mod space;
 
 use limine::request::{ExecutableAddressRequest, HhdmRequest, MemoryMapRequest};
-use spin::RwLock;
+use crate::lock::Lock;
 use crate::memory::physical::buddy_allocator::BuddyAllocator;
 use crate::memory::physical::MemoryManager;
 
@@ -20,8 +20,7 @@ static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 #[unsafe(link_section = ".requests")]
 static EXEC_ADDR_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
 
-// TODO: interrupt lock
-static PMM: RwLock<MemoryManager<BuddyAllocator<9>>> = RwLock::new(MemoryManager::default(
+static PMM: Lock<MemoryManager<BuddyAllocator<9>>> = Lock::new(MemoryManager::default(
     BuddyAllocator::default(),
     BuddyAllocator::default(),
 ));
