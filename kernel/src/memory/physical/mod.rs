@@ -13,6 +13,11 @@ use crate::memory::physical::map::{MapEntry, MemoryMap};
 
 logger!("PMM");
 
+#[derive(Debug)]
+pub struct PhysicalMemorySpace {
+    map: &'static mut MemoryMap,
+}
+
 struct EarlyAllocator {
     memory: Cell<*mut u8>,
     start_length: usize,
@@ -104,7 +109,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
     }
 
     pub fn init(&mut self, memory_map: &MemoryMapResponse, hhdm: &HhdmResponse,
-                exec_addr: &ExecutableAddressResponse) {
+                exec_addr: &ExecutableAddressResponse) -> PhysicalMemorySpace {
         unsafe { hhdm::set_offset(hhdm.offset() as usize) };
 
         Self::init_allocator(&mut self.alloc_32);
@@ -140,13 +145,15 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         self.alloc_32.init(0, min(1 << 32, memory_end));
         self.alloc_main.init(1 << 32, memory_end);
 
+        let mut allocators = [
+            &mut self.alloc_32,
+            &mut self.alloc_main
+        ];
+
         let early_alloc = EarlyAllocator::new(
             hhdm::as_ptr(largest_entry.base as usize), largest_entry.length as usize);
 
-        for alloc in [
-            &mut self.alloc_32,
-            &mut self.alloc_main
-        ] {
+        for alloc in &mut allocators {
             alloc.set_data(early_alloc.allocate_bytes(alloc.data_size())
                 .expect("Not enough memory for allocator data"));
         }
@@ -162,7 +169,36 @@ impl<A: MemoryAllocator> MemoryManager<A> {
 
         map_kernel(map, &early_alloc, exec_addr.virtual_base() as usize, kernel_pages);
         map_hhdm(map, &early_alloc, hhdm::get_offset(), address::large_page_count_up(memory_end));
+        
+        for i in 256..512 {
+            map.map_or_insert(i, || early_alloc.allocate_map());
+        }
 
         unsafe { map.set_current() };
+
+        let mut free_mem = 0;
+        for entry in memory_map.entries() {
+            match entry.entry_type {
+                EntryType::USABLE => {
+                    let entry = if *entry as *const Entry == largest_entry as *const Entry {
+                        let mut entry = **entry;
+                        entry.base += early_alloc.used() as u64;
+                        entry.length -= early_alloc.used() as u64;
+                        entry
+                    } else {
+                        **entry
+                    };
+                    for alloc in &mut allocators {
+                        alloc.include(entry.base as usize, (entry.base + entry.length) as usize);
+                    }
+                    free_mem += entry.length as usize;
+                },
+                _ => {},
+            }
+        }
+        
+        debug!("Free memory: {} kB", free_mem >> 10);
+        
+        PhysicalMemorySpace { map }
     }
 }

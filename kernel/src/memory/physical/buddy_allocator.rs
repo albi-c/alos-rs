@@ -18,6 +18,8 @@ pub struct BuddyAllocator<const N: usize> {
     start_page: usize,
     end_page: usize,
     enabled: bool,
+    first_free: usize,
+    last_free: usize,
 }
 
 unsafe impl<const N: usize> Send for BuddyAllocator<N> {}
@@ -43,21 +45,15 @@ impl<const N: usize> BuddyAllocator<N> {
             start_page: 0,
             end_page: 0,
             enabled: false,
+            first_free: 0,
+            last_free: usize::MAX,
         }
     }
 }
 
 impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
     fn new() -> Self {
-        BuddyAllocator {
-            data: 0 as *mut u8,
-            buddies: core::array::from_fn(|_| [].as_mut_slice()),
-            page_data_size: 0,
-            num_page_data_elements: 0,
-            start_page: 0,
-            end_page: 0,
-            enabled: false,
-        }
+        Self::default()
     }
 
     fn init(&mut self, start: usize, end: usize) {
@@ -66,6 +62,9 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
 
         self.start_page = start;
         self.end_page = end;
+
+        self.first_free = end;
+        self.last_free = start;
 
         self.enabled = end > start;
         if !self.enabled {
@@ -110,8 +109,15 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         let start = max(start, self.end_page);
         let end = min(end, self.start_page);
 
+        if end <= start {
+            return;
+        }
+
         let start_offset = start - self.start_page;
         let end_offset = end - self.start_page;
+
+        self.first_free = min(self.first_free, start_offset);
+        self.last_free = max(self.last_free, end_offset - 1);
 
         for i in start_offset..end_offset {
             self.alloc_rec_unset(0, i);
@@ -120,12 +126,45 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         self.alloc_rec_set(0, start_offset);
         self.alloc_rec_set(0, end_offset);
     }
+
+    fn alloc_page(&mut self) -> Option<usize> {
+        if !self.alloc_get_set(0, self.first_free) {
+            let addr = self.first_free << PAGE_SHIFT;
+            self.first_free += 1;
+            Some(addr)
+        } else {
+            for i in self.first_free..=self.last_free {
+                if !self.alloc_get_set(0, i) {
+                    let addr = i << PAGE_SHIFT;
+                    self.first_free = i + 1;
+                    return Some(addr);
+                }
+            }
+            None
+        }
+    }
+    fn dealloc_page(&mut self, addr: usize) {
+        assert!(address::is_page_aligned(addr));
+        let page = addr >> PAGE_SHIFT;
+        self.alloc_set(0, page);
+        self.first_free = min(self.first_free, page - self.start_page);
+        self.last_free = max(self.last_free, page - self.start_page + 1);
+    }
 }
 
-impl <const N: usize> BuddyAllocator<N> {
+impl<const N: usize> BuddyAllocator<N> {
     #[inline(always)]
     fn alloc_get(&mut self, level: usize, i: usize) -> bool {
         self.buddies[level][i >> PAGE_DATA_SHIFT] & (1 << (i & PAGE_DATA_MASK)) != 0
+    }
+
+    #[inline(always)]
+    fn alloc_get_set(&mut self, level: usize, i: usize) -> bool {
+        let bit = 1 << (i & PAGE_DATA_MASK);
+        let el = &mut self.buddies[level][i >> PAGE_DATA_SHIFT];
+        let set = (*el & bit) != 0;
+        *el |= bit;
+        set
     }
 
     #[inline]

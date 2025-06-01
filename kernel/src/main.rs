@@ -3,6 +3,7 @@
 #![feature(naked_functions)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(const_array_as_mut_slice)]
+#![feature(negative_impls)]
 
 mod drivers;
 mod ports;
@@ -12,6 +13,7 @@ mod gdt;
 mod interrupts;
 mod cpu;
 mod memory;
+mod lock;
 
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};

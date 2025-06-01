@@ -5,4 +5,7 @@ pub trait MemoryAllocator : Send + Sync {
     fn data_size(&self) -> usize;
     fn set_data(&mut self, data: &mut [u8]);
     fn include(&mut self, start: usize, end: usize);
+    
+    fn alloc_page(&mut self) -> Option<usize>;
+    fn dealloc_page(&mut self, addr: usize);
 }
