@@ -94,6 +94,7 @@ fn map_hhdm(map: &mut MemoryMap, alloc: &EarlyAllocator, offset: usize, large_pa
 pub struct MemoryManager<A: MemoryAllocator> {
     alloc_32: A,
     alloc_main: A,
+    initialized: bool,
 }
 
 impl<A: MemoryAllocator> MemoryManager<A> {
@@ -101,6 +102,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         MemoryManager {
             alloc_32,
             alloc_main,
+            initialized: false,
         }
     }
 
@@ -147,7 +149,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
 
         let mut allocators = [
             &mut self.alloc_32,
-            &mut self.alloc_main
+            &mut self.alloc_main,
         ];
 
         let early_alloc = EarlyAllocator::new(
@@ -163,6 +165,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         let kernel_pages = address::page_count_up(kernel_entry.length as usize);
         debug!("Kernel size: {} kB ({} pages)",
             (kernel_pages << address::PAGE_SHIFT) >> 10, kernel_pages);
+        // TODO: remove?
         assert!(kernel_pages <= 512, "Kernel size exceeded 2048 kB (512 pages)");
 
         let map = early_alloc.allocate_map();
@@ -196,9 +199,50 @@ impl<A: MemoryAllocator> MemoryManager<A> {
                 _ => {},
             }
         }
-        
+
         debug!("Free memory: {} kB", free_mem >> 10);
+
+        self.initialized = true;
         
         PhysicalMemorySpace { map }
+    }
+
+    fn allocators(&mut self) -> [&mut A; 2] {
+        assert!(self.initialized);
+        [&mut self.alloc_main, &mut self.alloc_32]
+    }
+
+    pub fn alloc_page(&mut self) -> Option<usize> {
+        for alloc in self.allocators() {
+            if let Some(page) = alloc.alloc_page() {
+                return Some(page);
+            }
+        }
+        None
+    }
+    pub fn dealloc_page(&mut self, addr: usize) {
+        for alloc in self.allocators() {
+            if alloc.dealloc_page(addr) {
+                return;
+            }
+        }
+        panic!("Attempted to deallocate non-existent memory");
+    }
+
+    pub fn alloc_pages(&mut self, count: usize) -> Option<usize> {
+        for alloc in self.allocators() {
+            if let Some(page) = alloc.alloc_pages(count) {
+                return Some(page);
+            }
+        }
+        None
+    }
+    pub fn dealloc_pages(&mut self, addr: usize, count: usize) {
+        for alloc in self.allocators() {
+            if alloc.dealloc_pages(addr, count) {
+                return;
+            }
+        }
+        panic!("Attempted to deallocate non-existent memory");
     }
 }

@@ -30,7 +30,7 @@ mod inner {
     }
 
     unsafe impl<T: ?Sized + Send> Send for Lock<T> {}
-    unsafe impl<T: ?Sized + Send + Sync> Sync for Lock<T> {}
+    unsafe impl<T: ?Sized> Sync for Lock<T> {}
     
     impl<T: Debug + ?Sized> Debug for Lock<T> {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -38,7 +38,7 @@ mod inner {
         }
     }
 
-    struct InterruptLockGuard<'a, T: ?Sized> {
+    pub struct InterruptLockGuard<'a, T: ?Sized> {
         guard: InterruptGuard,
         data: &'a mut T,
     }
@@ -87,7 +87,7 @@ mod inner {
     }
 
     unsafe impl<T: ?Sized + Send> Send for Lock<T> {}
-    unsafe impl<T: ?Sized + Send + Sync> Sync for Lock<T> {}
+    unsafe impl<T: ?Sized> Sync for Lock<T> {}
 
     impl<T: Debug + ?Sized> Debug for Lock<T> {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -95,12 +95,12 @@ mod inner {
         }
     }
     
-    struct RwLockGuard<'a, T: ?Sized> {
+    pub struct RwLockGuard<'a, T: ?Sized> {
         guard: InterruptGuard,
         data: spin::RwLockReadGuard<'a, T>,
     }
 
-    struct RwLockGuardMut<'a, T: ?Sized> {
+    pub struct RwLockGuardMut<'a, T: ?Sized> {
         guard: InterruptGuard,
         data: spin::RwLockWriteGuard<'a, T>,
     }

@@ -5,6 +5,9 @@
 #![feature(const_array_as_mut_slice)]
 #![feature(negative_impls)]
 #![feature(unsafe_cell_access)]
+#![feature(slice_as_chunks)]
+#![feature(slice_as_array)]
+extern crate alloc;
 
 mod drivers;
 mod ports;

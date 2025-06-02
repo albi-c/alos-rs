@@ -128,6 +128,9 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
     }
 
     fn alloc_page(&mut self) -> Option<usize> {
+        if !self.enabled {
+            return None;
+        }
         if !self.alloc_get_set(0, self.first_free) {
             let addr = self.first_free << PAGE_SHIFT;
             self.first_free += 1;
@@ -143,12 +146,48 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
             None
         }
     }
-    fn dealloc_page(&mut self, addr: usize) {
+    fn dealloc_page(&mut self, addr: usize) -> bool {
+        if !self.enabled || addr < (self.start_page << PAGE_SHIFT) || addr > (self.end_page << PAGE_SHIFT) {
+            return false;
+        }
         assert!(address::is_page_aligned(addr));
         let page = addr >> PAGE_SHIFT;
         self.alloc_set(0, page);
         self.first_free = min(self.first_free, page - self.start_page);
         self.last_free = max(self.last_free, page - self.start_page + 1);
+        true
+    }
+
+    fn alloc_pages(&mut self, count: usize) -> Option<usize> {
+        if !self.enabled {
+            return None;
+        }
+        // TODO: use buddies
+        'outer: for i in self.first_free..=self.last_free.checked_sub(count)? {
+            for j in 0..count {
+                if self.alloc_get(0, i + j) {
+                    continue 'outer;
+                }
+            }
+            self.alloc_set_n(0, i, count);
+            let addr = i << PAGE_SHIFT;
+            if i == self.first_free {
+                self.first_free = i + 1;
+            }
+            return Some(addr);
+        }
+        None
+    }
+    fn dealloc_pages(&mut self, addr: usize, count: usize) -> bool {
+        if !self.enabled || addr < (self.start_page << PAGE_SHIFT) || addr > (self.end_page << PAGE_SHIFT) {
+            return false;
+        }
+        assert!(address::is_page_aligned(addr));
+        let page = addr >> PAGE_SHIFT;
+        self.alloc_unset_n(0, page, count);
+        self.first_free = min(self.first_free, page - self.start_page);
+        self.last_free = max(self.last_free, page - self.start_page + count);
+        true
     }
 }
 
