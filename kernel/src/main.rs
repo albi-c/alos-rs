@@ -7,6 +7,7 @@
 #![feature(unsafe_cell_access)]
 #![feature(slice_as_chunks)]
 #![feature(slice_as_array)]
+#![feature(btree_cursors)]
 extern crate alloc;
 
 mod drivers;
