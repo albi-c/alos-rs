@@ -95,6 +95,10 @@ unsafe extern "C" fn kmain() -> ! {
 
 #[panic_handler]
 fn rust_panic(info: &core::panic::PanicInfo) -> ! {
-    error!("Kernel panic: {}", info.message());
+    if let Some(location) = info.location() {
+        error!("Kernel panic: {} [{}:{}]", info.message(), location.file(), location.line());
+    } else {
+        error!("Kernel panic: {}", info.message());
+    }
     cpu::hcf();
 }

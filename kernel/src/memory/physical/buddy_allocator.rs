@@ -6,6 +6,7 @@ use crate::memory::physical::allocator::MemoryAllocator;
 
 type PageData = u64;
 const PAGE_DATA_SHIFT: u8 = 6;
+const PAGE_DATA_BITS_SHIFT: u8 = PAGE_DATA_SHIFT + 3;
 const PAGE_DATA_FULL: PageData = !0;
 const PAGE_DATA_SIZE: usize = 1 << PAGE_DATA_SHIFT;
 const PAGE_DATA_MASK: usize = (1 << PAGE_DATA_SHIFT) - 1;
@@ -57,13 +58,13 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
     }
 
     fn init(&mut self, start: usize, end: usize) {
-        let start = address::page_align_up(start) >> PAGE_SHIFT;
-        let end = address::page_align_down(end) >> PAGE_SHIFT;
+        let start = address::page_count_up(start);
+        let end = address::page_count_down(end);
 
         self.start_page = start;
         self.end_page = end;
 
-        self.first_free = end;
+        self.first_free = end.checked_sub(start).unwrap_or(0);
         self.last_free = start;
 
         self.enabled = end > start;
@@ -73,7 +74,7 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
 
         let num_pages = end - start;
         self.page_data_size = (num_pages >> 2) + 1;
-        self.num_page_data_elements = num_pages >> (3 + PAGE_DATA_SHIFT);
+        self.num_page_data_elements = self.page_data_size >> PAGE_DATA_SHIFT;
     }
     fn data_size(&self) -> usize {
         self.page_data_size
@@ -85,7 +86,7 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
             core::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut PageData,
                                             self.num_page_data_elements)
         };
-        data.fill(0xff);
+        data.fill(PAGE_DATA_FULL);
 
         for i in 0..N {
             let (buddy, rest) = data.split_at_mut(
@@ -106,8 +107,8 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
             return;
         }
 
-        let start = max(start, self.end_page);
-        let end = min(end, self.start_page);
+        let start = max(start, self.start_page);
+        let end = min(end, self.end_page);
 
         if end <= start {
             return;
@@ -129,6 +130,9 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
 
     fn alloc_page(&mut self) -> Option<usize> {
         if !self.enabled {
+            return None;
+        }
+        if self.first_free > self.last_free {
             return None;
         }
         if !self.alloc_get_set(0, self.first_free) {
@@ -194,13 +198,13 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
 impl<const N: usize> BuddyAllocator<N> {
     #[inline(always)]
     fn alloc_get(&mut self, level: usize, i: usize) -> bool {
-        self.buddies[level][i >> PAGE_DATA_SHIFT] & (1 << (i & PAGE_DATA_MASK)) != 0
+        self.buddies[level][i >> PAGE_DATA_BITS_SHIFT] & (1 << (i & PAGE_DATA_MASK)) != 0
     }
 
     #[inline(always)]
     fn alloc_get_set(&mut self, level: usize, i: usize) -> bool {
         let bit = 1 << (i & PAGE_DATA_MASK);
-        let el = &mut self.buddies[level][i >> PAGE_DATA_SHIFT];
+        let el = &mut self.buddies[level][i >> PAGE_DATA_BITS_SHIFT];
         let set = (*el & bit) != 0;
         *el |= bit;
         set
@@ -221,8 +225,8 @@ impl<const N: usize> BuddyAllocator<N> {
         //     n -= PAGE_DATA_SIZE;
         // }
 
-        let idx = i >> PAGE_DATA_SHIFT;
-        self.buddies[level][idx..idx + (n >> PAGE_DATA_SHIFT)].fill(overwrite);
+        let idx = i >> PAGE_DATA_BITS_SHIFT;
+        self.buddies[level][idx..idx + (n >> PAGE_DATA_BITS_SHIFT)].fill(overwrite);
         let n1 = n;
         n &= PAGE_DATA_MASK;
         i += n1 - n;
@@ -236,7 +240,7 @@ impl<const N: usize> BuddyAllocator<N> {
 
     #[inline(always)]
     fn alloc_set(&mut self, level: usize, i: usize) {
-        self.buddies[level][i >> PAGE_DATA_SHIFT] |= 1 << (i & PAGE_DATA_MASK);
+        self.buddies[level][i >> PAGE_DATA_BITS_SHIFT] |= 1 << (i & PAGE_DATA_MASK);
     }
     fn alloc_set_n(&mut self, level: usize, i: usize, n: usize) {
         self._alloc_modify_n(level, i, n, Self::alloc_set, PAGE_DATA_FULL);
@@ -250,16 +254,16 @@ impl<const N: usize> BuddyAllocator<N> {
         }
 
         for o in 1..N-level {
-            if self.alloc_get(level - o, i >> o) {
+            if self.alloc_get(o, i >> o) {
                 break;
             }
-            self.alloc_set(level - o, i >> o);
+            self.alloc_set(o, i >> o);
         }
     }
 
     #[inline(always)]
     fn alloc_unset(&mut self, level: usize, i: usize) {
-        self.buddies[level][i >> PAGE_DATA_SHIFT] &= !(1 << (i & PAGE_DATA_MASK));
+        self.buddies[level][i >> PAGE_DATA_BITS_SHIFT] &= !(1 << (i & PAGE_DATA_MASK));
     }
     fn alloc_unset_n(&mut self, level: usize, i: usize, n: usize) {
         self._alloc_modify_n(level, i, n, Self::alloc_unset, 0);

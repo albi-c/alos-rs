@@ -30,6 +30,7 @@ impl VirtualMemorySpace {
     }
 
     fn allocate(&mut self, size: usize) -> Option<usize> {
+        // TODO: broken? - maybe returns wrong address
         let size = address::page_align_up(size);
         let (base, length) = self.data.iter_mut().filter_map(|(&base, entry)| match entry {
             MemoryAllocation::Free { length } if *length >= size => {

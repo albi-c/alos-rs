@@ -62,7 +62,7 @@ impl ToTokens for Handler {
             .replace("?i", &n.to_string());
         tokens.extend(quote! {
             #[unsafe(no_mangle)]
-            #[naked]
+            #[unsafe(naked)]
             unsafe extern "C" fn #ident() {
                 unsafe {
                     core::arch::naked_asm!(#source);

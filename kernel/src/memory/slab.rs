@@ -42,7 +42,7 @@ impl<const N: usize> SlabAllocator<N> {
             for chunk in chunks {
                 self.deallocate(chunk);
             }
-            let node = unsafe { self.node.get().as_mut() }.unwrap();
+            let node = unsafe { self.node.get().as_mut() }.expect("No memory was allocated");
             self.node.set(node.next);
             unsafe { core::mem::transmute(node) }
         }
@@ -85,7 +85,8 @@ impl Slabs {
             memory::dealloc_pages(hhdm::from_ptr(memory.as_ptr()), address::page_count_up(size));
         } else {
             let bit_len = usize::BITS - (size - 1).leading_zeros();
-            self.container.write().deallocate(bit_len as usize, memory);
+            self.container.write().deallocate(bit_len as usize, unsafe {
+                core::slice::from_raw_parts_mut(memory.as_mut_ptr(), 1 << bit_len) });
         }
     }
 }
