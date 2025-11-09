@@ -1,8 +1,9 @@
 use core::arch::asm;
 use spin::Mutex;
+use crate::lock::Lock;
 
 const NUM_PORTS: usize = 1 << 16;
-static PORT_MAP: Mutex<[u8; NUM_PORTS / 8]> = Mutex::new([0; NUM_PORTS / 8]);
+static PORT_MAP: Lock<[u8; NUM_PORTS / 8]> = Lock::new([0; NUM_PORTS / 8]);
 
 #[derive(Debug)]
 pub struct Port {
@@ -27,7 +28,7 @@ impl Port {
     }
 
     pub fn alloc(start: u16, length: u16) -> Option<Self> {
-        let mut map = PORT_MAP.lock();
+        let mut map = PORT_MAP.write();
         for i in start..(start + length) {
             if map[(i >> 3) as usize] & (i as u8 & 0x7) != 0 {
                 return None;
@@ -40,7 +41,7 @@ impl Port {
     }
 
     pub fn dealloc(&mut self) {
-        let mut map = PORT_MAP.lock();
+        let mut map = PORT_MAP.write();
         for i in self.start..(self.start + self.length) {
             map[(i >> 3) as usize] &= !(i as u8 & 0x7);
         }

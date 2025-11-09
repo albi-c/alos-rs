@@ -2,6 +2,7 @@ use core::arch::asm;
 use spin::Mutex;
 use macros::{interrupt_handlers, interrupt_handlers_arr};
 use crate::cpu;
+use crate::lock::Lock;
 use crate::ports::Port;
 
 #[derive(Debug)]
@@ -80,7 +81,7 @@ pub type ExcHandler = fn(ExcContext) -> ();
 
 static mut IDT: [IdtEntry; 256] = unsafe { core::mem::zeroed() };
 static mut HANDLERS: [u64; 256] = unsafe { core::mem::zeroed() };
-static HANDLERS_REPLACEABLE: Mutex<[bool; 256]> = Mutex::new(unsafe { core::mem::zeroed() });
+static HANDLERS_REPLACEABLE: Lock<[bool; 256]> = Lock::new(unsafe { core::mem::zeroed() });
 
 static mut ASM_IRQ_HANDLER_TABLE: [u64; 256] = unsafe { core::mem::zeroed() };
 interrupt_handlers!();
@@ -132,7 +133,7 @@ pub fn init(mask: u16) {
         };
     }
 
-    HANDLERS_REPLACEABLE.lock().fill(true);
+    HANDLERS_REPLACEABLE.write().fill(true);
 
     #[allow(static_mut_refs)]
     let info = unsafe { Info::new(&IDT) };
@@ -156,7 +157,7 @@ pub fn init(mask: u16) {
 }
 
 fn attach(irq: usize, handler: u64, replaceable: bool) -> bool {
-    let mut handlers_replaceable = HANDLERS_REPLACEABLE.lock();
+    let mut handlers_replaceable = HANDLERS_REPLACEABLE.write();
     if !handlers_replaceable[irq] {
         false
     } else {

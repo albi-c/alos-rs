@@ -1,28 +1,30 @@
 use core::fmt::Write;
-use lazy_static::lazy_static;
-use spin::Mutex;
 use crate::ports::Port;
 
-lazy_static! {
-    pub static ref SERIAL: Mutex<Serial> = Mutex::new(Serial::new());
-}
+pub static mut SERIAL: Serial = unsafe { core::mem::zeroed() };
 
 pub struct Serial {
     port: Port,
 }
 
 impl Serial {
-    fn new() -> Self {
+    pub fn new() -> Self {
+        let port = Port::alloc(0x3f8, 6).expect("Couldn't allocate port for serial");
+        port.out_b(2, 0x01);
         Serial {
-            port: Port::alloc(0x3f8, 6).expect("Couldn't allocate port for serial"),
+            port,
         }
     }
 
-    fn write(&self, ch: u8) {
+    pub fn write(&self, ch: u8) {
         self.port.out_b(0, ch);
         if ch == b'\n' {
             self.port.out_b(0, b'\r');
         }
+    }
+
+    pub fn read(&self) -> Option<u8> {
+        (self.port.in_b(5) & 0x1 != 0).then(|| self.port.in_b(0))
     }
 }
 

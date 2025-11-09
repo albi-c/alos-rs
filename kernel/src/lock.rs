@@ -100,9 +100,17 @@ mod inner {
         data: spin::RwLockReadGuard<'a, T>,
     }
 
+    impl<T: ?Sized> Drop for RwLockGuard<'_, T> {
+        fn drop(&mut self) {}
+    }
+
     pub struct RwLockGuardMut<'a, T: ?Sized> {
         guard: InterruptGuard,
         data: spin::RwLockWriteGuard<'a, T>,
+    }
+
+    impl<T: ?Sized> Drop for RwLockGuardMut<'_, T> {
+        fn drop(&mut self) {}
     }
 
     impl<'a, T: ?Sized> Deref for RwLockGuard<'a, T> {

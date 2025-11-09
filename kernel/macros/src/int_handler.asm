@@ -13,7 +13,7 @@
     mov rdi, ?i
     mov rsi, r9
     sti
-    call exc_handler
+    call irq_handler
     cli
 
     ?pop_all

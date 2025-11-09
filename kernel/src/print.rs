@@ -3,7 +3,8 @@ use crate::drivers::serial::SERIAL;
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;
-    SERIAL.lock().write_fmt(args).unwrap();
+    #[expect(static_mut_refs)]
+    unsafe { SERIAL.write_fmt(args).unwrap(); }
 }
 
 #[macro_export]

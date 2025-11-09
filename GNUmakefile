@@ -9,7 +9,8 @@ override USER_VARIABLE = $(if $(filter $(origin $(1)),default undefined),$(eval 
 $(call USER_VARIABLE,KARCH,x86_64)
 
 # Default user QEMU flags. These are appended to the QEMU command calls.
-$(call USER_VARIABLE,QEMUFLAGS,-m 2G)
+# $(call USER_VARIABLE,QEMUFLAGS,-m 2G -serial mon:stdio)
+$(call USER_VARIABLE,QEMUFLAGS,-m 2G -serial mon:stdio -nographic)
 
 override IMAGE_NAME := alos-$(KARCH)
 
@@ -144,6 +145,7 @@ debug-bios: $(IMAGE_NAME).iso
 		-cdrom $(IMAGE_NAME).iso \
 		-boot d \
 		-s -S -no-reboot -no-shutdown -d cpu_reset,int \
+		-enable-kvm -cpu host,migratable=no,+invtsc,+ssse3,+sse4.1,+sse4.2,+avx,+xsave,enforce \
 		$(QEMUFLAGS)
 
 .PHONY: gdb

@@ -1,5 +1,5 @@
 use core::sync::atomic::{AtomicU64, Ordering};
-use crate::interrupts;
+use crate::{interrupts, println};
 use crate::interrupts::IrqContext;
 use crate::ports::Port;
 

@@ -23,6 +23,7 @@ mod lock;
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use crate::drivers::pit;
+use crate::drivers::serial::{Serial, SERIAL};
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -55,6 +56,8 @@ fn irq_handler(ctx: interrupts::IrqContext) {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
     cpu::disable_interrupts();
+
+    unsafe { SERIAL = Serial::new() };
 
     assert!(BASE_REVISION.is_supported());
 
@@ -90,7 +93,30 @@ unsafe extern "C" fn kmain() -> ! {
     pit::init();
     memory::init();
 
-    cpu::hcf();
+    fn serial_read() -> Option<u8> {
+        #[expect(static_mut_refs)]
+        unsafe { SERIAL.read() }
+    }
+    loop {
+        if let Some(ch) = serial_read() {
+            match ch {
+                13 => println!(),
+                27 => if serial_read() == Some(91) {
+                    if let Some(ch) = serial_read() {
+                        match ch {
+                            65 => println!("Up"),
+                            66 => println!("Down"),
+                            67 => println!("Right"),
+                            68 => println!("Left"),
+                            _ => println!("Unknown escape sequence: {}", ch),
+                        }
+                    }
+                }
+                127 => print!("\x08 \x08"),
+                _ => print!("{}", ch as char),
+            }
+        }
+    }
 }
 
 #[panic_handler]
