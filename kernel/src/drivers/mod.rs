@@ -1,19 +1,19 @@
-use crate::{linker_set_declare, linker_set_slice};
+use crate::{linker_set_declare, linker_set_slice_mut};
 
 pub mod serial;
 pub mod pit;
 
 #[derive(Debug)]
-pub struct DriverInitializer {
+pub struct Driver {
     name: &'static str,
     init: fn(),
-    requirements: &'static mut [(&'static str, Option<&'static DriverInitializer>)],
-    next: Option<&'static DriverInitializer>,
+    requirements: &'static mut [(&'static str, Option<&'static Driver>)],
+    next: Option<&'static Driver>,
     _padding: [u64; 2],
 }
 
-impl DriverInitializer {
-    pub const fn new(name: &'static str, init: fn(), requirements: &'static mut [(&'static str, Option<&'static DriverInitializer>)]) -> Self {
+impl Driver {
+    pub const fn new(name: &'static str, init: fn(), requirements: &'static mut [(&'static str, Option<&'static Driver>)]) -> Self {
         const {
             assert!(size_of::<Self>() == 64);
         }
@@ -30,14 +30,14 @@ impl DriverInitializer {
         self.name
     }
 
-    pub fn requirements(&self) -> &[(&'static str, Option<&'static DriverInitializer>)] {
+    pub fn requirements(&self) -> &[(&'static str, Option<&'static Driver>)] {
         self.requirements
     }
-    pub unsafe fn requirements_mut(&self) -> &mut [(&'static str, Option<&'static DriverInitializer>)] {
-        unsafe { core::mem::transmute(self.requirements) }
+    pub unsafe fn requirements_mut(&self) -> &mut [(&'static str, Option<&'static Driver>)] {
+        unsafe { core::slice::from_raw_parts_mut(self.requirements.as_ptr() as *mut _, self.requirements.len()) }
     }
 
-    pub fn requirement(&self, name: &str) -> Option<&'static DriverInitializer> {
+    pub fn requirement(&self, name: &str) -> Option<&'static Driver> {
         // TODO: compile time lookup
         let res = self.requirements.iter().find(|(req_name, _)| *req_name == name);
         match res {
@@ -55,33 +55,36 @@ macro_rules! count_tts {
 }
 
 #[macro_export]
-macro_rules! driver_initializer {
+macro_rules! driver {
     ($name:literal, $init:expr) => {
-        crate::driver_initializer!($name, $init, []);
+        crate::driver!($name, $init, []);
     };
     ($name:literal, $init:expr, [$($requirements:literal),*]) => {
-        crate::driver_initializer!(DRIVER, $name, $init, [$($requirements),*]);
+        crate::driver!(DRIVER, $name, $init, [$($requirements),*]);
     };
     ($var:ident, $name:literal, $init:expr) => {
-        crate::driver_initializer!($var, $name, $init, []);
+        crate::driver!($var, $name, $init, []);
     };
     ($var:ident, $name:literal, $init:expr, [$($requirements:literal),*]) => {
         paste::paste! {
-            static mut [<_DRIVER_REQS_ $var>]: [(&'static str, Option<&'static crate::drivers::DriverInitializer>); crate::count_tts!($($requirements),*)] = [$(($requirements, None)),*];
-            crate::linker_set_item!(driver_initializers, $var: crate::drivers::DriverInitializer = crate::drivers::DriverInitializer::new(
+            static mut [<_DRIVER_REQS_ $var>]: [(&'static str, Option<&'static crate::drivers::Driver>); crate::count_tts!($($requirements),*)] = [$(($requirements, None)),*];
+            static [<_DRIVER_ $var>]: crate::drivers::Driver = crate::drivers::Driver::new(
                 $name,
                 $init,
                 #[expect(static_mut_refs)]
                 unsafe { &mut [<_DRIVER_REQS_ $var>] },
-            ));
+            );
+            crate::linker_set_item!(driver_initializers, $var: &'static crate::drivers::Driver = &[<_DRIVER_ $var>]);
         }
     };
 }
 
-linker_set_declare!(driver_initializers, DriverInitializer);
+linker_set_declare!(driver_initializers, &'static Driver);
 
 pub fn init() {
-    for init in linker_set_slice!(driver_initializers) {
-        (init.init)();
+    let drivers = linker_set_slice_mut!(driver_initializers);
+    drivers.sort_by_key(|init| init.name);
+    for driver in drivers {
+        (driver.init)();
     }
 }
