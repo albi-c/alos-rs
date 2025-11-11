@@ -8,6 +8,7 @@
 #![feature(slice_as_chunks)]
 #![feature(slice_as_array)]
 #![feature(btree_cursors)]
+#![feature(slice_from_ptr_range)]
 extern crate alloc;
 
 mod drivers;
@@ -19,6 +20,7 @@ mod interrupts;
 mod cpu;
 mod memory;
 mod lock;
+mod linker_set;
 
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
@@ -92,6 +94,8 @@ unsafe extern "C" fn kmain() -> ! {
 
     pit::init();
     memory::init();
+
+    drivers::init();
 
     fn serial_read() -> Option<u8> {
         #[expect(static_mut_refs)]

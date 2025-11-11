@@ -16,3 +16,4 @@ macros = { path = "macros" }
 limine = "0.4"
 spin = "0.10.0"
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
+paste = "1.0.15"

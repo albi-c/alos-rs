@@ -1,5 +1,5 @@
 use core::sync::atomic::{AtomicU64, Ordering};
-use crate::{interrupts, println};
+use crate::{driver_initializer, interrupts, println};
 use crate::interrupts::IrqContext;
 use crate::ports::Port;
 
@@ -29,3 +29,5 @@ pub fn init() {
     
     TICKS.store(0, Ordering::Relaxed);
 }
+
+driver_initializer!("PIT", || println!("PIT initialized"), ["serial", "PIT"]);
