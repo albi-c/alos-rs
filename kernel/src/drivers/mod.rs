@@ -83,7 +83,7 @@ linker_set_declare!(driver_initializers, &'static Driver);
 
 pub fn init() {
     let drivers = linker_set_slice_mut!(driver_initializers);
-    drivers.sort_by_key(|init| init.name);
+    drivers.sort_unstable_by_key(|init| init.name);
     for driver in drivers {
         (driver.init)();
     }
