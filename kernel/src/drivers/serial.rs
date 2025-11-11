@@ -1,37 +1,33 @@
 use core::fmt::Write;
-use crate::ports::Port;
+use core::sync::atomic::{AtomicBool, Ordering};
+use crate::const_port;
 
-pub static mut SERIAL: Serial = unsafe { core::mem::zeroed() };
+const_port!(PORT: 0x3f8, 6);
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
-pub struct Serial {
-    port: Port,
-}
-
-impl Serial {
-    pub fn new() -> Self {
-        let port = Port::alloc(0x3f8, 6).expect("Couldn't allocate port for serial");
-        port.out_b(2, 0x01);
-        Serial {
-            port,
-        }
-    }
-
-    pub fn write(&self, ch: u8) {
-        self.port.out_b(0, ch);
-        if ch == b'\n' {
-            self.port.out_b(0, b'\r');
-        }
-    }
-
-    pub fn read(&self) -> Option<u8> {
-        (self.port.in_b(5) & 0x1 != 0).then(|| self.port.in_b(0))
+pub fn init() {
+    if !INITIALIZED.swap(true, Ordering::Relaxed) {
+        PORT.out_b(2, 0x01);
     }
 }
+
+pub fn write(ch: u8) {
+    PORT.out_b(0, ch);
+    if ch == b'\n' {
+        PORT.out_b(0, b'\r');
+    }
+}
+
+pub fn read() -> Option<u8> {
+    (PORT.in_b(5) & 0x1 != 0).then(|| PORT.in_b(0))
+}
+
+pub struct Serial;
 
 impl Write for Serial {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for ch in s.bytes() {
-            self.write(ch);
+            write(ch);
         }
         Ok(())
     }

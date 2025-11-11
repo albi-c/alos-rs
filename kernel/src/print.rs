@@ -1,10 +1,9 @@
-use crate::drivers::serial::SERIAL;
+use crate::drivers::serial::Serial;
 
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
     use core::fmt::Write;
-    #[expect(static_mut_refs)]
-    unsafe { SERIAL.write_fmt(args).unwrap(); }
+    Serial.write_fmt(args).unwrap();
 }
 
 #[macro_export]

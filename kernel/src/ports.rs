@@ -1,9 +1,30 @@
 use core::arch::asm;
-use spin::Mutex;
+use crate::{linker_set_declare, linker_set_slice};
 use crate::lock::Lock;
 
 const NUM_PORTS: usize = 1 << 16;
-static PORT_MAP: Lock<[u8; NUM_PORTS / 8]> = Lock::new([0; NUM_PORTS / 8]);
+type PortMap = [u8; NUM_PORTS / 8];
+static PORT_MAP: Lock<PortMap> = Lock::new([0; NUM_PORTS / 8]);
+
+#[macro_export]
+macro_rules! const_port {
+    ($name:ident: $start:literal, $end:literal) => {
+        paste::paste! {
+            crate::linker_set_item!(const_ports, [<_CONST_PORT_ $name>]: (u16, u16) = ($start, $end));
+            static $name: crate::ports::Port = unsafe { crate::ports::Port::new($start, $end) };
+        }
+    };
+}
+
+linker_set_declare!(const_ports, (u16, u16));
+const_port!(_PLACEHOLDER: 0, 0);
+
+pub fn init() {
+    let mut map = PORT_MAP.write();
+    for &(start, length) in linker_set_slice!(const_ports) {
+        assert!(Port::try_alloc(start, length, &mut map), "failed to allocate constant port 0x{:x}, {}", start, length);
+    }
+}
 
 #[derive(Debug)]
 pub struct Port {
@@ -19,25 +40,29 @@ impl Drop for Port {
 
 #[allow(unused)]
 impl Port {
-    const fn new(start: u16, length: u16) -> Self {
-        Port { start, length }
+    pub const unsafe fn new(start: u16, length: u16) -> Self {
+        Self { start, length }
     }
 
     pub const fn empty() -> Self {
-        Self::new(0, 0)
+        Self { start: 0, length: 0 }
     }
 
-    pub fn alloc(start: u16, length: u16) -> Option<Self> {
-        let mut map = PORT_MAP.write();
+    fn try_alloc(start: u16, length: u16, map: &mut PortMap) -> bool {
         for i in start..(start + length) {
             if map[(i >> 3) as usize] & (i as u8 & 0x7) != 0 {
-                return None;
+                return false;
             }
         }
         for i in start..(start + length) {
             map[(i >> 3) as usize] |= i as u8 & 0x7;
         }
-        Some(Self::new(start, length))
+        true
+    }
+
+    pub fn alloc(start: u16, length: u16) -> Option<Self> {
+        let mut map = PORT_MAP.write();
+        Self::try_alloc(start, length, &mut map).then_some(Self { start, length })
     }
 
     pub fn dealloc(&mut self) {

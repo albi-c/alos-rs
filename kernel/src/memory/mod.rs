@@ -38,15 +38,15 @@ pub fn init() {
         0xffff_f000_0000_0000, 0xfff_8000_0000);
 }
 
-fn alloc_page() -> Option<usize> {
+pub fn alloc_page() -> Option<usize> {
     PMM.write().alloc_page()
 }
-fn dealloc_page(addr: usize) {
+pub fn dealloc_page(addr: usize) {
     PMM.write().dealloc_page(addr)
 }
-fn alloc_pages(count: usize) -> Option<usize> {
+pub fn alloc_pages(count: usize) -> Option<usize> {
     PMM.write().alloc_pages(count)
 }
-fn dealloc_pages(addr: usize, count: usize) {
+pub fn dealloc_pages(addr: usize, count: usize) {
     PMM.write().dealloc_pages(addr, count)
 }

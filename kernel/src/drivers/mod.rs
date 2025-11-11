@@ -1,7 +1,7 @@
 use crate::{linker_set_declare, linker_set_slice_mut};
 
 pub mod serial;
-pub mod pit;
+pub(crate) mod time;
 
 #[derive(Debug)]
 pub struct Driver {
@@ -80,6 +80,7 @@ macro_rules! driver {
 }
 
 linker_set_declare!(driver_initializers, &'static Driver);
+driver!(PLACEHOLDER, "__placeholder", || ());
 
 pub fn init() {
     let drivers = linker_set_slice_mut!(driver_initializers);

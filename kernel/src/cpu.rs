@@ -47,3 +47,34 @@ pub fn hcf() -> ! {
         }
     }
 }
+
+#[inline(always)]
+pub fn msr_read(msr: u32) -> u64 {
+    let eax: u32;
+    let edx: u32;
+    unsafe {
+        asm!(
+            "rdmsr",
+            in("ecx") msr,
+            out("eax") eax,
+            out("edx") edx,
+            options(nomem, nostack),
+        )
+    }
+    ((eax as u64) << 32) | edx as u64
+}
+
+#[inline(always)]
+pub fn msr_write(msr: u32, val: u64) {
+    let eax: u32 = (val >> 32) as u32;
+    let edx: u32 = val as u32;
+    unsafe {
+        asm!(
+            "wrmsr",
+            in("ecx") msr,
+            in("eax") eax,
+            in("edx") edx,
+            options(nomem, nostack),
+        )
+    }
+}
