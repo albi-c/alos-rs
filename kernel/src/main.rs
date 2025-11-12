@@ -22,12 +22,12 @@ mod memory;
 mod lock;
 mod linker_set;
 mod volatile;
+mod acpi;
 
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use drivers::time::pit;
 use crate::drivers::serial;
-use crate::drivers::time::pvclock;
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -96,8 +96,6 @@ unsafe extern "C" fn kmain() -> ! {
     }
 
     pit::init();
-    pvclock::init();
-    println!("Nanoseconds: {:?}", pvclock::get_nanoseconds());
     memory::init();
 
     drivers::init();

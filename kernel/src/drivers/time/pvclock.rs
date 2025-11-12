@@ -1,7 +1,7 @@
 use core::arch::x86_64::{__cpuid, _rdtsc};
 use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use crate::cpu::msr_write;
-use crate::{memory, println, volatile_struct};
+use crate::{driver, memory, volatile_struct};
 
 const CPUID_LEAF: u32 = 0x4000001;
 const MSR: u32 = 0x4b564d01;
@@ -21,7 +21,6 @@ static TIME_INFO: AtomicPtr<TimeInfo> = AtomicPtr::new(core::ptr::null_mut());
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 pub fn init() {
-    println!("pvclock: cpuid({}) = 0x{:x}", CPUID_LEAF, unsafe { __cpuid(CPUID_LEAF) }.eax);
     if unsafe { __cpuid(CPUID_LEAF) }.eax & (1 << 3) == 0 {
         return;
     }
@@ -31,6 +30,8 @@ pub fn init() {
         TIME_INFO.store(memory::hhdm::as_ptr(addr), Ordering::Relaxed);
     }
 }
+
+driver!("pvclock", init);
 
 pub fn get_nanoseconds() -> Option<u64> {
     unsafe { TIME_INFO.load(Ordering::Relaxed).as_ref() }.map(|info| info.get_nanoseconds())

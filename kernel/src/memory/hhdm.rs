@@ -1,3 +1,4 @@
+use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 static OFFSET: AtomicUsize = AtomicUsize::new(0);
@@ -25,6 +26,10 @@ pub fn sub(addr: usize) -> usize {
 #[inline(always)]
 pub fn as_ptr<T>(addr: usize) -> *mut T {
     add(addr) as *mut T
+}
+#[inline(always)]
+pub fn as_non_null<T>(addr: usize) -> NonNull<T> {
+    NonNull::new(as_ptr(addr)).expect("invalid hhdm offset")
 }
 
 #[inline(always)]
