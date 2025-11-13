@@ -6,6 +6,7 @@ use crate::core_local;
 pub struct FileDescriptor {}
 
 #[derive(Debug, Copy, Clone)]
+#[repr(u32)]
 pub enum TaskState {
     Running,
     Blocked,
@@ -20,6 +21,7 @@ pub fn get_current() -> &'static Task {
 }
 
 #[derive(Debug)]
+#[repr(C)]
 pub struct Task {
     name: String,
     next: Option<&'static Task>,

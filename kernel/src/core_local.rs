@@ -50,6 +50,7 @@ pub fn core_info() -> &'static CoreInfo {
     core_info_local().get()
 }
 
+#[repr(C)]
 pub struct CoreLocal<T>(Cell<usize>, PhantomData<T>);
 
 impl<T> CoreLocal<T> {
