@@ -1,15 +1,14 @@
 #![no_std]
 #![no_main]
-#![feature(naked_functions)]
 #![feature(maybe_uninit_array_assume_init)]
-#![feature(const_array_as_mut_slice)]
 #![feature(negative_impls)]
 #![feature(unsafe_cell_access)]
-#![feature(slice_as_chunks)]
 #![feature(slice_as_array)]
 #![feature(btree_cursors)]
 #![feature(slice_from_ptr_range)]
 #![feature(abi_x86_interrupt)]
+#![feature(thread_local)]
+#![feature(transmutability)]
 extern crate alloc;
 
 mod drivers;
@@ -24,6 +23,8 @@ mod lock;
 mod linker_set;
 mod volatile;
 mod acpi;
+mod task;
+mod core_local;
 
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
@@ -98,6 +99,7 @@ unsafe extern "C" fn kmain() -> ! {
 
     pit::init();
     memory::init();
+    core_local::init();
 
     drivers::init();
 

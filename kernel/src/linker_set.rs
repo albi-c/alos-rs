@@ -63,6 +63,7 @@ macro_rules! linker_set_item {
             #[used]
             static mut [<_LINKER_SET_VAL_ $name>]: $ty = $expr;
             #[expect(static_mut_refs)]
+            #[used]
             static $name: crate::linker_set::LinkerSetItem<$ty> = crate::linker_set::LinkerSetItem::new(unsafe { &mut [<_LINKER_SET_VAL_ $name>] });
         }
     };

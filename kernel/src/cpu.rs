@@ -61,13 +61,13 @@ pub fn msr_read(msr: u32) -> u64 {
             options(nomem, nostack),
         )
     }
-    ((eax as u64) << 32) | edx as u64
+    ((edx as u64) << 32) | eax as u64
 }
 
 #[inline(always)]
 pub fn msr_write(msr: u32, val: u64) {
-    let eax: u32 = (val >> 32) as u32;
-    let edx: u32 = val as u32;
+    let eax: u32 = val as u32;
+    let edx: u32 = (val >> 32) as u32;
     unsafe {
         asm!(
             "wrmsr",

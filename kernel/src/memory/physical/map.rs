@@ -231,7 +231,7 @@ impl MemoryMap {
     }
 
     pub fn iterate<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: usize,
-                                                         mut alloc: A) -> MemoryMapIterator<4, A> {
+                                                         mut alloc: A) -> MemoryMapIterator<'_, 4, A> {
         let indices = Self::get_indices(addr);
 
         let m1 = self.map_or_insert(indices[0], || alloc());
@@ -247,7 +247,7 @@ impl MemoryMap {
     }
 
     pub fn iterate_3<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: usize,
-                                                            mut alloc: A) -> MemoryMapIterator<3, A> {
+                                                            mut alloc: A) -> MemoryMapIterator<'_, 3, A> {
         let [indices @ .., _] = Self::get_indices(addr);
 
         let m1 = self.map_or_insert(indices[0], || alloc());

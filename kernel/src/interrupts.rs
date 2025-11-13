@@ -1,5 +1,4 @@
 use core::arch::asm;
-use spin::Mutex;
 use macros::{interrupt_handlers, interrupt_handlers_arr};
 use crate::cpu;
 use crate::lock::Lock;

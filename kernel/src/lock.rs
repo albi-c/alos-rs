@@ -141,14 +141,14 @@ mod inner {
     }
 
     impl<T: ?Sized> Lock<T> {
-        pub fn write(&self) -> RwLockGuardMut<T> {
+        pub fn write(&self) -> RwLockGuardMut<'_, T> {
             let guard = InterruptGuard::new();
             RwLockGuardMut {
                 guard,
                 data: self.lock.write(),
             }
         }
-        pub fn read(&self) -> RwLockGuard<T> {
+        pub fn read(&self) -> RwLockGuard<'_, T> {
             let guard = InterruptGuard::new();
             RwLockGuard {
                 guard,
