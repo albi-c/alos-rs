@@ -7,6 +7,9 @@ edition = "2024"
 resolver = "2"
 members = ["macros"]
 
+[target.x86_64-unknown-none]
+rustflags = ["-C", "target-feature=-mmx", "-C", "target-feature=-sse"]
+
 [features]
 default = ["smp"]
 smp = []

@@ -1,4 +1,4 @@
-use crate::{linker_set_declare, linker_set_slice_mut};
+use crate::{linker_set_declare, linker_set_slice_mut, println};
 
 pub mod serial;
 pub(crate) mod time;
@@ -84,7 +84,7 @@ driver!(PLACEHOLDER, "__placeholder", || ());
 
 pub fn init() {
     let drivers = linker_set_slice_mut!(driver_initializers);
-    drivers.sort_unstable_by_key(|init| init.name);
+    drivers.sort_unstable_by_key(|driver| driver.name);
     for driver in drivers {
         (driver.init)();
     }

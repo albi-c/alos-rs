@@ -9,6 +9,7 @@
 #![feature(slice_as_array)]
 #![feature(btree_cursors)]
 #![feature(slice_from_ptr_range)]
+#![feature(abi_x86_interrupt)]
 extern crate alloc;
 
 mod drivers;

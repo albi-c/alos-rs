@@ -86,27 +86,40 @@ static HANDLERS_REPLACEABLE: Lock<[bool; 256]> = Lock::new(unsafe { core::mem::z
 static mut ASM_IRQ_HANDLER_TABLE: [u64; 256] = unsafe { core::mem::zeroed() };
 interrupt_handlers!();
 
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct InterruptStackFrame {
+    pub ip: u64,
+    pub cs: u16,
+    _pad0: [u8; 6],
+    pub flags: u64,
+    pub sp: u64,
+    pub ss: u16,
+    _pad1: [u8; 6],
+}
+
 fn default_irq_handler(_: IrqContext) {}
 fn default_exc_handler(_: ExcContext) {}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_handler(irq: u16, flags: u64) {
+pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u16) {
     let ctx = IrqContext {
         irq,
-        flags,
+        flags: frame.flags,
     };
     (unsafe { core::mem::transmute::<_, IrqHandler>(HANDLERS[irq as usize]) })(ctx);
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn exc_handler(exc: u16, error: u64, address: u64,
-                              instruction: u64, user: bool, flags: u64) {
+pub extern "C" fn exc_handler(frame: &InterruptStackFrame, exc: u16, error_code: u64) {
+    let cr2: u64;
+    unsafe { asm!("mov {0}, cr2", out(reg) cr2) };
     let ctx = ExcContext {
         exc,
-        error,
-        address,
-        instruction,
-        user,
-        flags,
+        error: error_code,
+        address: cr2,
+        instruction: frame.ip,
+        user: frame.cs == 0x18,
+        flags: frame.flags,
     };
     (unsafe { core::mem::transmute::<_, ExcHandler>(HANDLERS[exc as usize]) })(ctx);
 }

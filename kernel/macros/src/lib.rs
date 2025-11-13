@@ -41,33 +41,47 @@ pop rax";
 
 impl ToTokens for Handler {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let n = self.0;
+        let n: u16 = self.0.try_into().unwrap();
         let ident = Ident::new(
             &format!("_interrupt_handler_{}", n), proc_macro2::Span::call_site());
-        let source = if n < 32 {
-            if [8, 10, 11, 12, 13, 14, 17, 21, 29, 30].contains(&n) {
-                include_str!("err_handler.asm")
-            } else {
-                include_str!("exc_handler.asm")
-            }
-        } else if n < 0x40 {
-            include_str!("int_handler.asm")
-        } else {
-            // TODO: apic acknowledge
-            include_str!("int_high_handler.asm")
-        }
-            .replace("?push_all", PUSH_ALL)
-            .replace("?pop_all", POP_ALL)
-            .replace("?out_mid", if n >= 0x28 { "out 0xa0, al" } else { "" })
-            .replace("?i", &n.to_string());
-        tokens.extend(quote! {
-            #[unsafe(no_mangle)]
-            #[unsafe(naked)]
-            unsafe extern "C" fn #ident() {
-                unsafe {
-                    core::arch::naked_asm!(#source);
+        tokens.extend(match n {
+            0x00..0x20 if [8, 10, 11, 12, 13, 14, 17, 21, 29, 30].contains(&n) => quote! {
+                #[unsafe(no_mangle)]
+                extern "x86-interrupt" fn #ident(frame: crate::interrupts::InterruptStackFrame, error_code: u64) {
+                    exc_handler(&frame, #n, error_code);
                 }
-            }
+            },
+            0x00..0x20 => quote! {
+                #[unsafe(no_mangle)]
+                extern "x86-interrupt" fn #ident(frame: crate::interrupts::InterruptStackFrame) {
+                    exc_handler(&frame, #n, 0);
+                }
+            },
+            0x20..0x28 => quote! {
+                #[unsafe(no_mangle)]
+                extern "x86-interrupt" fn #ident(frame: crate::interrupts::InterruptStackFrame) {
+                    irq_handler(&frame, #n);
+                    unsafe { asm!("out 0x20, al", in("al") 0x20u8, options(nomem, nostack)); }
+                }
+            },
+            0x28..0x30 => quote! {
+                #[unsafe(no_mangle)]
+                extern "x86-interrupt" fn #ident(frame: crate::interrupts::InterruptStackFrame) {
+                    irq_handler(&frame, #n);
+                    unsafe { asm!("out 0xa0, al\nout 0x20, al", in("al") 0x20u8, options(nomem, nostack)); }
+                }
+            },
+            0x30..0xff => quote! {
+                #[unsafe(no_mangle)]
+                extern "x86-interrupt" fn #ident(frame: crate::interrupts::InterruptStackFrame) {
+                    irq_handler(&frame, #n);
+                }
+            },
+            0xff => quote! {
+                #[unsafe(no_mangle)]
+                extern "x86-interrupt" fn #ident(_frame: crate::interrupts::InterruptStackFrame) {}
+            },
+            _ => panic!("Invalid interrupt number: {}", n),
         });
     }
 }
@@ -89,7 +103,7 @@ impl ToTokens for HandlerRef {
         let ident = Ident::new(
             &format!("_interrupt_handler_{}", n), proc_macro2::Span::call_site());
         tokens.extend(quote! {
-            unsafe { core::mem::transmute(#ident as unsafe extern "C" fn() -> ()) }
+            #ident as u64
         });
     }
 }
