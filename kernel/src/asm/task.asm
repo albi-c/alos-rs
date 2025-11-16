@@ -3,7 +3,7 @@
 // fn()
 .extern _task_lock_force_unlock
 
-// fn(&Task)
+// fn(&Task, &Task)
 .global _task_switch
 // fn(&Task) -> !
 .global _task_switch_continue
@@ -21,12 +21,11 @@ _task_switch:
 	push r14
 	push r15
 
+	mov [rsi + 0], rsp
+
 	mov r12, [CURRENT_TASK]
-	mov rax, gs:[r12]
-
-	mov [rax + 0], rsp
-
-	mov gs:[r12], rdi
+	mov rsi, [rdi + 40]
+	mov gs:[r12], rsi
 
 _task_switch_continue:
 	mov rsp, [rdi + 0]

@@ -1,14 +1,16 @@
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::arch::global_asm;
 use core::mem::offset_of;
+use core::ops::{Index, IndexMut};
 use core::ptr::NonNull;
-use crate::{core_local, cpu};
+use crate::{core_local, cpu, println};
 use crate::core_local::core_info;
-use crate::lock::Lock;
+use crate::lock::{Lock, RwLockGuardMut};
 use crate::memory::{address, MemoryFlags, MemorySpace};
 
 const KERNEL_STACK_SIZE: usize = 1 << 16;
@@ -17,7 +19,9 @@ const CALLEE_SAVED_REGS: usize = 6;
 
 global_asm!(include_str!("../asm/task.asm"));
 unsafe extern "C" {
-    fn _task_switch(task: &mut Task);
+    #[allow(improper_ctypes)]
+    fn _task_switch(task: &mut Task, current: &mut Task);
+    #[allow(improper_ctypes)]
     fn _task_switch_continue(task: &mut Task) -> !;
 }
 
@@ -29,6 +33,9 @@ unsafe extern "C" fn _task_lock_force_unlock() {
 #[derive(Debug, Default)]
 struct Tasks {
     tasks: Vec<Option<Box<Task>>>,
+
+    run_queue: VecDeque<usize>,
+    sleep_queue: BTreeMap<usize, usize>,
 }
 
 impl Tasks {
@@ -37,6 +44,10 @@ impl Tasks {
     }
     fn get_mut(&mut self, id: usize) -> Option<&mut Task> {
         Some(self.tasks.get_mut(id)?.as_mut()?)
+    }
+
+    fn get_disjoint_mut<const N: usize>(&mut self, ids: [usize; N]) -> Option<[&mut Option<Box<Task>>; N]> {
+        self.tasks.get_disjoint_mut(ids).ok()
     }
 
     fn insert(&mut self, task: Box<Task>) -> usize {
@@ -54,8 +65,23 @@ impl Tasks {
     }
 }
 
+impl Index<usize> for Tasks {
+    type Output = Task;
+    fn index(&self, index: usize) -> &Self::Output {
+        self.tasks[index].as_ref().unwrap()
+    }
+}
+impl IndexMut<usize> for Tasks {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.tasks[index].as_mut().unwrap()
+    }
+}
+
 static TASKS: Lock<Tasks> = Lock::new(Tasks {
-    tasks: Vec::new(),
+    tasks: vec![],
+
+    run_queue: VecDeque::new(),
+    sleep_queue: BTreeMap::new(),
 });
 
 #[derive(Debug)]
@@ -70,7 +96,7 @@ pub enum TaskState {
     Terminated,
 }
 
-core_local!(#no_mangle CURRENT_TASK: Option<&'static mut Task> = None);
+core_local!(#no_mangle CURRENT_TASK: usize = 0);
 
 fn prepare_task_switch(task: &mut Task) {
     cpu::disable_interrupts();
@@ -78,6 +104,26 @@ fn prepare_task_switch(task: &mut Task) {
     // set kernel stack in tss
     // set kernel stack in core header
     task.core = core_info().id;
+}
+
+pub fn task_switch(next: usize) -> Result<(), usize> {
+    // will be unlocked in _task_switch()
+    let mut lock = TASKS.write();
+    let current_id = CURRENT_TASK.read();
+    if next == current_id {
+        return Ok(());
+    }
+    let [current, next] = lock.get_disjoint_mut(
+        [current_id, next]).expect("invalid task id");
+    let current = current.as_mut().unwrap().as_mut();
+    let next = next.as_mut().unwrap().as_mut();
+    prepare_task_switch(next);
+
+    unsafe { _task_switch(next, current); }
+
+    // will be unlocked in _task_switch()
+    core::mem::forget(lock);
+    Ok(())
 }
 
 pub fn init<T: Sized>(func: extern "C" fn(Box<T>) -> !, param: Box<T>) -> ! {
@@ -118,7 +164,6 @@ pub struct Task {
 
 fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>) -> (NonNull<u8>, NonNull<u8>) {
     const { assert!(size_of::<Box<T>>() == size_of::<usize>()) };
-    // let mut stack = vec![0usize; size / size_of::<usize>()].into_boxed_slice();
 
     let stack = MemorySpace::with(|mem| {
         let pages = address::page_count_up(size);
@@ -154,6 +199,7 @@ impl Task {
 
     const fn check_kernel_stack_struct_offset() {
         assert!(offset_of!(Task, kernel_stack) == 0);
+        assert!(offset_of!(Task, id) == 40);
     }
 
     pub fn new_kernel<T: Sized>(func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>, name: String) -> Box<Self> {
@@ -184,7 +230,7 @@ impl Task {
         TASKS.write().insert(self)
     }
 
-    pub fn current() -> &'static mut Task {
-        CURRENT_TASK.read().expect("no current task")
+    pub fn current() -> usize {
+        CURRENT_TASK.read()
     }
 }

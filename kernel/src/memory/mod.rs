@@ -95,15 +95,16 @@ impl MemorySpace {
     }
 
     pub fn map(&mut self, phys: usize, virt: usize, count: usize, flags: MemoryFlags) {
-        assert!(address::is_page_aligned(phys));
-        assert!(address::is_page_aligned(virt));
-        assert!(count > 0);
-        let mut it = self.phys.map.iterate(
-            phys, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) });
-        for i in 0..count {
-            let me = it.next();
-            *me = MapEntry::new_with_flags(virt + i * address::PAGE_SIZE, flags.0).present();
-        }
+        self.map_flag_func(phys, virt, count, |_| flags);
+        // assert!(address::is_page_aligned(phys));
+        // assert!(address::is_page_aligned(virt));
+        // assert!(count > 0);
+        // let mut it = self.phys.map.iterate(
+        //     phys, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) });
+        // for i in 0..count {
+        //     let me = it.next();
+        //     *me = MapEntry::new_with_flags(virt + i * address::PAGE_SIZE, flags.0).present();
+        // }
     }
     pub fn map_flag_func(&mut self, phys: usize, virt: usize, count: usize,
                          mut flags: impl FnMut(usize) -> MemoryFlags) {
@@ -116,6 +117,14 @@ impl MemorySpace {
             let me = it.next();
             *me = MapEntry::new_with_flags(phys + i * address::PAGE_SIZE, flags(i).0).present();
         }
+
+        // unsafe {
+        //     asm!(
+        //         "mov {0}, cr3",
+        //         "mov cr3, {0}",
+        //         out(reg) _
+        //     );
+        // }
     }
     pub fn unmap(&mut self, virt: usize, count: usize) {
         assert!(address::is_page_aligned(virt));

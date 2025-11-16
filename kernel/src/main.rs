@@ -34,6 +34,7 @@ use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use drivers::time::pit;
 use crate::drivers::serial;
+use crate::task::Task;
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -111,8 +112,24 @@ unsafe extern "C" fn kmain() -> ! {
     task::init(kernel_main_task, Box::new("hello, world!".to_owned()));
 }
 
+extern "C" fn kernel_side_task(task: Box<usize>) -> ! {
+    debug!("Side task entered");
+
+    task::task_switch(*task).unwrap();
+
+    debug!("Side task continues");
+
+    loop {}
+}
+
 extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
     debug!("Main task entered: {}", msg);
+
+    let task = Task::new_kernel(Some((kernel_side_task, Box::new(Task::current()))), "side".to_owned());
+    let id = task.add_to_tasks();
+    task::task_switch(id).unwrap();
+
+    debug!("Main task continues");
 
     loop {
         if let Some(ch) = serial::read() {

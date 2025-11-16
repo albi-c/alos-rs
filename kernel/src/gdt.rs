@@ -95,14 +95,13 @@ struct TSS {
     iopb: u16,
 }
 
-#[derive(Debug, Copy, Clone)]
 #[repr(align(16))]
-struct StackAlignedByte(u8);
+struct AlignedExcStack([u8; 0x10000]);
 
 const GDT_SIZE: usize = 7;
 static mut CORE_0_GDT: [GDT; GDT_SIZE] = unsafe { core::mem::zeroed() };
 static mut CORE_0_TSS: TSS = unsafe { core::mem::zeroed() };
-static mut CORE_0_EXC_STACK: [StackAlignedByte; 0x10000] = [StackAlignedByte(0); _];
+static mut CORE_0_EXC_STACK: AlignedExcStack = AlignedExcStack([0; _]);
 
 pub fn init() {
     const {
@@ -111,7 +110,7 @@ pub fn init() {
     }
     #[expect(static_mut_refs)]
     unsafe {
-        let exc_stack = CORE_0_EXC_STACK.as_ptr().byte_add(CORE_0_EXC_STACK.len()) as u64;
+        let exc_stack = CORE_0_EXC_STACK.0.as_ptr().byte_add(CORE_0_EXC_STACK.0.len()) as u64;
         for i in 0..7 {
             CORE_0_TSS.ist[i] = exc_stack;
             if i < 4 {

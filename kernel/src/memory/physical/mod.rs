@@ -165,8 +165,6 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         let kernel_pages = address::page_count_up(kernel_entry.length as usize) + 10;
         debug!("Kernel size: {} kB ({} pages)",
             (kernel_pages << address::PAGE_SHIFT) >> 10, kernel_pages);
-        // TODO: remove?
-        assert!(kernel_pages <= 512, "Kernel size exceeded 2048 kB (512 pages)");
 
         let map = early_alloc.allocate_map();
 

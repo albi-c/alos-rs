@@ -1,15 +1,21 @@
 use alloc::collections::BTreeMap;
 use core::ops::Bound;
 use crate::memory::address;
+use crate::println;
 
 #[derive(Debug, Copy, Clone)]
-enum MemoryAllocation {
-    Free {
-        length: usize,
-    },
-    Allocated {
-        length: usize,
-    },
+struct MemoryAllocation {
+    allocated: bool,
+    length: usize,
+}
+
+impl MemoryAllocation {
+    pub const fn free(length: usize) -> Self {
+        Self { allocated: false, length }
+    }
+    pub const fn allocated(length: usize) -> Self {
+        Self { allocated: true, length }
+    }
 }
 
 #[derive(Debug)]
@@ -22,27 +28,25 @@ impl VirtualMemorySpace {
         VirtualMemorySpace {
             data: BTreeMap::from([(
                 address::page_align_up(start),
-                MemoryAllocation::Free {
-                    length: address::page_align_down(length),
-                }
+                MemoryAllocation::free(address::page_align_down(length)),
             )]),
         }
     }
 
     pub fn allocate(&mut self, size: usize) -> Option<usize> {
-        // TODO: broken? - maybe returns wrong address
         assert!(address::is_page_aligned(size));
-        let (base, length) = self.data.iter_mut().filter_map(|(&base, entry)| match entry {
-            MemoryAllocation::Free { length } if *length >= size => {
-                *length -= size;
-                Some((base, *length))
-            },
-            _ => None,
-        }).next()?;
-        if length == 0 {
-            self.data.remove(&base);
-        }
-        self.data.insert(base + length, MemoryAllocation::Allocated { length: size });
+        let (base, rem) = self.data.iter_mut().filter_map(
+            |(&base, entry)| if !entry.allocated && entry.length >= size {
+                let rem = entry.length - size;
+                entry.allocated = true;
+                entry.length = size;
+                Some((base, rem))
+            } else {
+                None
+            }
+        ).next()?;
+        if rem == 0 {}
+        self.data.insert(base + size, MemoryAllocation::free(rem));
         Some(base)
     }
     
