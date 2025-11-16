@@ -97,7 +97,7 @@ struct TSS {
 
 #[derive(Debug, Copy, Clone)]
 #[repr(align(16))]
-struct StackAlignedByte(pub u8);
+struct StackAlignedByte(u8);
 
 const GDT_SIZE: usize = 7;
 static mut CORE_0_GDT: [GDT; GDT_SIZE] = unsafe { core::mem::zeroed() };

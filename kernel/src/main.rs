@@ -111,15 +111,8 @@ unsafe extern "C" fn kmain() -> ! {
     task::init(kernel_main_task, Box::new("hello, world!".to_owned()));
 }
 
-#[expect(unconditional_recursion)]
-fn overflow() -> ! {
-    overflow();
-}
-
 extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
     debug!("Main task entered: {}", msg);
-
-    overflow();
 
     loop {
         if let Some(ch) = serial::read() {

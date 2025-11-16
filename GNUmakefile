@@ -13,8 +13,8 @@ $(call USER_VARIABLE,QEMUFLAGS,-m 2G -serial mon:stdio -nographic)
 #$(call USER_VARIABLE,QEMUFLAGS,-m 2G -d cpu_reset,int)
 #$(call USER_VARIABLE,QEMUFLAGS,-m 2G -d int -no-reboot -no-shutdown)
 
-#CPU_OPTS = -enable-kvm -cpu host,migratable=no,+invtsc,+ssse3,+sse4.1,+sse4.2,+avx,+xsave,enforce
-CPU_OPTS =
+CPU_OPTS = -enable-kvm -cpu host,migratable=no,+invtsc,+ssse3,+sse4.1,+sse4.2,+avx,+xsave,enforce
+#CPU_OPTS =
 
 override IMAGE_NAME := alos-$(KARCH)
 
