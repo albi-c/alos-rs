@@ -79,7 +79,7 @@ fn prepare_task_switch(task: &mut Task) {
     task.core = core_info().id;
 }
 
-pub fn init<T: Sized>(func: extern "C" fn(Box<T>), param: Box<T>) -> ! {
+pub fn init<T: Sized>(func: extern "C" fn(Box<T>) -> !, param: Box<T>) -> ! {
     let task = Task::new_kernel(Some((func, param)), "init".to_owned());
     let id = task.add_to_tasks();
 
@@ -93,15 +93,12 @@ pub fn init<T: Sized>(func: extern "C" fn(Box<T>), param: Box<T>) -> ! {
 }
 
 extern "C" fn kernel_stack_underflow() -> ! {
-    panic!("kernel stack underflow")
+    panic!("kernel stack underflow - task function returned")
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct Task {
-    stack: NonNull<u8>,
-    stack_base: NonNull<u8>,
-
     kernel_stack: NonNull<u8>,
     kernel_stack_base: NonNull<u8>,
     kernel_stack_start: NonNull<u8>,
@@ -118,7 +115,7 @@ pub struct Task {
     files: Vec<FileDescriptor>,
 }
 
-fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<T>), Box<T>)>) -> (NonNull<u8>, NonNull<u8>) {
+fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>) -> (NonNull<u8>, NonNull<u8>) {
     const { assert!(size_of::<Box<T>>() == size_of::<usize>()) };
     let mut stack = vec![0usize; size / size_of::<usize>()].into_boxed_slice();
     let base = NonNull::new(stack.as_mut_ptr()).unwrap();
@@ -127,7 +124,7 @@ fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<
     let top = NonNull::new(&raw mut stack[offset]).unwrap();
     let (func, param) = func.map_or(
         (0, 0), |(func, param)| (func as usize, Box::leak(param) as *mut _ as usize));
-    // param, function, kill (for stack underflow), 0
+    // param, function, stack underflow function, 0
     stack[offset+CALLEE_SAVED_REGS..offset+CALLEE_SAVED_REGS+INIT_VALUES].copy_from_slice(&[
         param,
         func,
@@ -142,19 +139,16 @@ impl Task {
     pub const FLAG_IDLE: u32 = 1 << 1;
 
     const fn check_kernel_stack_struct_offset() {
-        assert!(offset_of!(Task, kernel_stack) == 16);
+        assert!(offset_of!(Task, kernel_stack) == 0);
     }
 
-    pub fn new_kernel<T: Sized>(func: Option<(extern "C" fn(Box<T>), Box<T>)>, name: String) -> Box<Self> {
+    pub fn new_kernel<T: Sized>(func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>, name: String) -> Box<Self> {
         const { Self::check_kernel_stack_struct_offset() };
 
         let is_idle = func.is_none();
         let (kernel_stack, kernel_stack_base) = allocate_kernel_stack(
             KERNEL_STACK_SIZE, func);
         Box::new(Self {
-            stack: NonNull::dangling(),
-            stack_base: NonNull::dangling(),
-
             kernel_stack,
             kernel_stack_base,
             kernel_stack_start: kernel_stack,

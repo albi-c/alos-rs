@@ -8,6 +8,9 @@ impl MapEntry {
     pub const MASK_ADDR: u64 = 0x000f_ffff_ffff_f000;
     pub const MASK_FLAGS: u64 = !Self::MASK_ADDR;
 
+    pub const SHIFT_AVL: u8 = 9;
+    pub const MASK_AVL: u64 = 0xe00;
+
     pub const FLAG_PRESENT: u64 = 1 << 0;
     pub const FLAG_WRITE: u64 = 1 << 1;
     pub const FLAG_USER: u64 = 1 << 2;
@@ -149,6 +152,15 @@ impl MapEntry {
     #[inline(always)]
     pub fn is_no_exec(self) -> bool {
         self.0 & Self::FLAG_NO_EXEC != 0
+    }
+
+    #[inline(always)]
+    pub fn with_avl(self, avl: u8) -> Self {
+        MapEntry(self.0 | (((avl as u64) << Self::SHIFT_AVL) & Self::MASK_AVL))
+    }
+    #[inline(always)]
+    pub fn get_avl(self) -> u8 {
+        ((self.0 & Self::MASK_AVL) >> Self::SHIFT_AVL) as u8
     }
 }
 

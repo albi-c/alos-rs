@@ -110,7 +110,7 @@ unsafe extern "C" fn kmain() -> ! {
     task::init(kernel_main_task, Box::new("hello, world!".to_owned()));
 }
 
-extern "C" fn kernel_main_task(msg: Box<String>) {
+extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
     debug!("Main task entered: {}", msg);
 
     loop {
