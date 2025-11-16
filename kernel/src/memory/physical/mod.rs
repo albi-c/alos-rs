@@ -1,6 +1,6 @@
 mod allocator;
 pub mod buddy_allocator;
-mod map;
+pub mod map;
 
 use core::cell::Cell;
 use core::cmp::{max, min};
@@ -15,7 +15,7 @@ logger!("PMM");
 
 #[derive(Debug)]
 pub struct PhysicalMemorySpace {
-    map: &'static mut MemoryMap,
+    pub map: &'static mut MemoryMap,
 }
 
 struct EarlyAllocator {

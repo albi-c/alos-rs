@@ -29,9 +29,9 @@ impl VirtualMemorySpace {
         }
     }
 
-    fn allocate(&mut self, size: usize) -> Option<usize> {
+    pub fn allocate(&mut self, size: usize) -> Option<usize> {
         // TODO: broken? - maybe returns wrong address
-        let size = address::page_align_up(size);
+        assert!(address::is_page_aligned(size));
         let (base, length) = self.data.iter_mut().filter_map(|(&base, entry)| match entry {
             MemoryAllocation::Free { length } if *length >= size => {
                 *length -= size;
@@ -46,7 +46,9 @@ impl VirtualMemorySpace {
         Some(base)
     }
     
-    fn deallocate(&mut self, base: usize, size: usize) -> Option<usize> {
+    pub fn deallocate(&mut self, base: usize, size: usize) -> Option<usize> {
+        assert!(address::is_page_aligned(base));
+        assert!(address::is_page_aligned(size));
         let end = base + size;
         let mut cur = self.data.lower_bound_mut(Bound::Included(&base));
         while let Some((&base, entry)) = cur.next() {

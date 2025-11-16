@@ -102,16 +102,24 @@ unsafe extern "C" fn kmain() -> ! {
     }
 
     pit::init();
-    memory::init();
+    let memory_values = memory::init();
     core_local::init();
+    memory::init_core_local(memory_values);
 
     drivers::init();
 
     task::init(kernel_main_task, Box::new("hello, world!".to_owned()));
 }
 
+#[expect(unconditional_recursion)]
+fn overflow() -> ! {
+    overflow();
+}
+
 extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
     debug!("Main task entered: {}", msg);
+
+    // overflow();
 
     loop {
         if let Some(ch) = serial::read() {

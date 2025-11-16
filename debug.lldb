@@ -1,0 +1,2 @@
+target create "kernel/kernel"
+gdb-remote localhost:1234

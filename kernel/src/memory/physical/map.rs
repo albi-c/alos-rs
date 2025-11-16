@@ -1,5 +1,6 @@
 use core::arch::asm;
 use crate::memory::hhdm;
+use crate::{print, println};
 
 #[derive(Debug, Copy, Clone)]
 pub struct MapEntry(pub u64);
@@ -270,6 +271,54 @@ impl MemoryMap {
             maps: [self, m1, m2],
             alloc,
             has: true,
+        }
+    }
+
+    fn print_ident(n: usize) {
+        for _ in 0..n {
+            print!("  ");
+        }
+    }
+
+    fn sign_extend_addr(a: usize) -> usize {
+        if a >= 0x8000_0000_0000 {
+            a | 0xffff_8000_0000_0000
+        } else {
+            a
+        }
+    }
+
+    pub fn dump(&self, level: usize, virt_address: usize, skip: usize) {
+        let addr_shift = 12 + 9 * (3 - level);
+        let mut prev = None;
+        for (i, &entry) in self.data.iter().enumerate().skip(skip) {
+            if !entry.is_present() {
+                continue;
+            }
+            let addr = virt_address | (i << addr_shift);
+            if level == 3 || entry.is_large() {
+                let sx = Self::sign_extend_addr(addr);
+                let ad = entry.addr();
+                Self::print_ident(level);
+                if i != 511 && let Some((psx, pad)) = prev {
+                    if sx == (psx + (1 << addr_shift)) && ad == (pad + (1 << addr_shift)) {
+                        println!("...");
+                    } else {
+                        println!("{:x} -> {:x}", sx, ad);
+                    }
+                } else {
+                    println!("{:x} -> {:x}", sx, ad);
+                }
+                prev = Some((sx, ad));
+            } else if let Some(child) = entry.as_map() {
+                if child.data.iter().any(|e| e.is_present()) {
+                    Self::print_ident(level);
+                    println!("{:x} -> ... [{:p}]", Self::sign_extend_addr(addr), child);
+                    child.dump(level + 1, addr, 0);
+                }
+            } else if entry.0 != 0 {
+                println!("? {:x} [{:x}]", entry.0, entry.addr());
+            }
         }
     }
 }

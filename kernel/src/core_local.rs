@@ -5,7 +5,7 @@ use core::cell::Cell;
 use core::marker::PhantomData;
 use core::mem::offset_of;
 use core::ptr::NonNull;
-use crate::{linker_set_declare, linker_set_slice, println};
+use crate::{linker_set_declare, linker_set_slice};
 use crate::cpu::msr_write;
 
 const MSR_GS_BASE: u32 = 0xc0000101;
@@ -64,6 +64,9 @@ impl<T> CoreLocal<T> {
         self.0.set(*offset);
         *offset += size_of::<T>();
     }
+    pub unsafe fn late_init(&self, value: T) {
+        unsafe { self.get_ptr().write(value) };
+    }
 
     #[inline(always)]
     pub fn initialized(&self) -> bool {
@@ -112,6 +115,13 @@ linker_set_declare!(core_locals, (fn(&mut usize), fn()));
 
 #[macro_export]
 macro_rules! _core_local_ls_item {
+    ($name: ident, $ty:ty) => {
+        paste::paste! {
+            crate::linker_set_item!(core_locals, [<_CL_INIT_ $name>]: (fn(&mut usize), fn()) = (|offset| {
+                unsafe { $name.init_offset(offset); }
+            }, || {}));
+        }
+    };
     ($name: ident, $ty:ty, $value:expr) => {
         paste::paste! {
             crate::linker_set_item!(core_locals, [<_CL_INIT_ $name>]: (fn(&mut usize), fn()) = (|offset| {
@@ -133,6 +143,10 @@ macro_rules! core_local {
         #[unsafe(no_mangle)]
         $vis static $name: crate::core_local::CoreLocal<$ty> = unsafe { crate::core_local::CoreLocal::new() };
         crate::_core_local_ls_item!($name, $ty, $value);
+    };
+    (#late_init $vis:vis $name:ident: $ty:ty) => {
+        $vis static $name: crate::core_local::CoreLocal<$ty> = unsafe { crate::core_local::CoreLocal::new() };
+        crate::_core_local_ls_item!($name, $ty);
     };
 }
 

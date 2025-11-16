@@ -152,6 +152,10 @@ debug-bios: $(IMAGE_NAME).iso
 gdb:
 	gdb -x debug.gdb
 
+.PHONY: lldb
+lldb:
+	lldb -s debug.lldb
+
 .PHONY: run-hdd-bios
 run-hdd-bios: $(IMAGE_NAME).hdd
 	qemu-system-$(KARCH) \

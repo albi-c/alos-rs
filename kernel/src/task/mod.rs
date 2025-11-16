@@ -9,6 +9,7 @@ use core::ptr::NonNull;
 use crate::{core_local, cpu};
 use crate::core_local::core_info;
 use crate::lock::Lock;
+use crate::memory::{address, MemoryFlags, MemorySpace};
 
 const KERNEL_STACK_SIZE: usize = 1 << 16;
 
@@ -117,7 +118,20 @@ pub struct Task {
 
 fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>) -> (NonNull<u8>, NonNull<u8>) {
     const { assert!(size_of::<Box<T>>() == size_of::<usize>()) };
-    let mut stack = vec![0usize; size / size_of::<usize>()].into_boxed_slice();
+    // let mut stack = vec![0usize; size / size_of::<usize>()].into_boxed_slice();
+
+    let stack = MemorySpace::with(|mem| {
+        let pages = address::page_count_up(size);
+        let phys_addr = mem.phys_alloc(pages).expect("out of physical memory");
+        let virt_addr = mem.virt_alloc(pages);
+        mem.map_flag_func(phys_addr, virt_addr, pages, |i| if i == 0 {
+            MemoryFlags::DEFAULT_RO
+        } else {
+            MemoryFlags::DEFAULT_RW
+        });
+        unsafe { core::slice::from_raw_parts_mut(virt_addr as *mut usize, size / size_of::<usize>()) }
+    });
+
     let base = NonNull::new(stack.as_mut_ptr()).unwrap();
     const INIT_VALUES: usize = 4;
     let offset = stack.len() - (INIT_VALUES + CALLEE_SAVED_REGS + 1);
