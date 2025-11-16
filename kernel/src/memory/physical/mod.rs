@@ -162,7 +162,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
 
         debug!("Allocator data: {} kB", early_alloc.used() >> 10);
 
-        let kernel_pages = address::page_count_up(kernel_entry.length as usize);
+        let kernel_pages = address::page_count_up(kernel_entry.length as usize) + 10;
         debug!("Kernel size: {} kB ({} pages)",
             (kernel_pages << address::PAGE_SHIFT) >> 10, kernel_pages);
         // TODO: remove?

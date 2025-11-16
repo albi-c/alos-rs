@@ -18,11 +18,11 @@ struct IdtEntry {
 }
 
 impl IdtEntry {
-    fn new(offset: u64, trap: bool) -> Self {
+    fn new(offset: u64, trap: bool, i: usize) -> Self {
         IdtEntry {
             offset_1: offset as u16,
             selector: 0x08,
-            ist: 0x0,
+            ist: if i == 8 { 0x1 } else { 0x0 },
             type_attr: if trap { 0x8f } else { 0x8e },
             offset_2: (offset >> 16) as u16,
             offset_3: (offset >> 32) as u32,
@@ -141,7 +141,7 @@ pub fn init(mask: u16) {
                 core::mem::transmute(default_irq_handler as IrqHandler)
             };
 
-            IDT[i] = IdtEntry::new(ASM_IRQ_HANDLER_TABLE[i], i < 32);
+            IDT[i] = IdtEntry::new(ASM_IRQ_HANDLER_TABLE[i], i < 32, i);
         };
     }
 

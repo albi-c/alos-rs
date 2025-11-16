@@ -119,7 +119,7 @@ fn overflow() -> ! {
 extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
     debug!("Main task entered: {}", msg);
 
-    // overflow();
+    overflow();
 
     loop {
         if let Some(ch) = serial::read() {
