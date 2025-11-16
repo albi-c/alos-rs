@@ -30,8 +30,7 @@ impl<const N: usize> SlabAllocator<N> {
     }
 
     pub fn allocate(&mut self) -> &'static mut [u8; N] {
-        let node = self.node.get();
-        if let Some(node) = unsafe { node.as_mut() } {
+        if let Some(node) = unsafe { self.node.get().as_mut() } {
             self.node.set(node.next);
             unsafe { core::mem::transmute(node) }
         } else {

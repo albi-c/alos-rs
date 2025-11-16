@@ -10,6 +10,9 @@ members = ["macros"]
 [target.x86_64-unknown-none]
 rustflags = ["-C", "target-feature=-mmx", "-C", "target-feature=-sse"]
 
+[profile.dev]
+opt-level = 1
+
 [features]
 default = ["smp"]
 smp = []

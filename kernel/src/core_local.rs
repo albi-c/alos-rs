@@ -5,7 +5,7 @@ use core::cell::Cell;
 use core::marker::PhantomData;
 use core::mem::offset_of;
 use core::ptr::NonNull;
-use crate::{linker_set_declare, linker_set_slice};
+use crate::{linker_set_declare, linker_set_slice, println};
 use crate::cpu::msr_write;
 
 const MSR_GS_BASE: u32 = 0xc0000101;
@@ -28,12 +28,13 @@ pub fn init() {
     msr_write(MSR_GS_BASE, p as u64);
     msr_write(MSR_KERNEL_GS_BASE, 0);
     unsafe { (p as *mut CoreInfo).write(CoreInfo {
-        core_local_data: NonNull::new(mem.as_mut_ptr() as *mut u8).unwrap(),
+        core_local_data: NonNull::new(p as *mut u8).unwrap(),
         id: 0,
     }); }
     for (_, init_value) in linker_set_slice!(core_locals) {
         init_value();
     }
+    core::mem::forget(mem);
 }
 
 #[inline(always)]
@@ -102,7 +103,7 @@ impl<T: CoreLocalItem> CoreLocal<T> {
 
 unsafe impl<T> Sync for CoreLocal<T> {}
 
-trait CoreLocalItem : Sized + Copy {
+trait CoreLocalItem : Sized {
     fn core_local_read(variable: &CoreLocal<Self>) -> Self;
     fn core_local_write(self, variable: &CoreLocal<Self>);
 }
@@ -110,16 +111,28 @@ trait CoreLocalItem : Sized + Copy {
 linker_set_declare!(core_locals, (fn(&mut usize), fn()));
 
 #[macro_export]
-macro_rules! core_local {
-    ($vis:vis $name:ident: $ty:ty = $value:expr) => {
+macro_rules! _core_local_ls_item {
+    ($name: ident, $ty:ty, $value:expr) => {
         paste::paste! {
-            $vis static $name: crate::core_local::CoreLocal<$ty> = unsafe { crate::core_local::CoreLocal::new() };
             crate::linker_set_item!(core_locals, [<_CL_INIT_ $name>]: (fn(&mut usize), fn()) = (|offset| {
                 unsafe { $name.init_offset(offset); }
             }, || {
                 unsafe { $name.get_ptr().write($value); }
             }));
         }
+    };
+}
+
+#[macro_export]
+macro_rules! core_local {
+    ($vis:vis $name:ident: $ty:ty = $value:expr) => {
+        $vis static $name: crate::core_local::CoreLocal<$ty> = unsafe { crate::core_local::CoreLocal::new() };
+        crate::_core_local_ls_item!($name, $ty, $value);
+    };
+    (#no_mangle $vis:vis $name:ident: $ty:ty = $value:expr) => {
+        #[unsafe(no_mangle)]
+        $vis static $name: crate::core_local::CoreLocal<$ty> = unsafe { crate::core_local::CoreLocal::new() };
+        crate::_core_local_ls_item!($name, $ty, $value);
     };
 }
 
@@ -243,5 +256,31 @@ impl<T: Sized> CoreLocalItem for Option<&'static T> {
     #[inline(always)]
     fn core_local_write(self, variable: &CoreLocal<Self>) {
         unsafe { asm!("mov qword ptr gs:[{0}], {1:r}", in(reg) variable.offset(), in(reg) self.map_or(core::ptr::null(), |r| r as *const T)); }
+    }
+}
+
+impl<T: Sized> CoreLocalItem for &'static mut T {
+    #[inline(always)]
+    fn core_local_read(variable: &CoreLocal<Self>) -> Self {
+        let result: *mut T;
+        unsafe { asm!("mov {0:r}, qword ptr gs:[{1}]", out(reg) result, in(reg) variable.offset()); }
+        unsafe { result.as_mut() }.unwrap()
+    }
+    #[inline(always)]
+    fn core_local_write(self, variable: &CoreLocal<Self>) {
+        unsafe { asm!("mov qword ptr gs:[{0}], {1:r}", in(reg) variable.offset(), in(reg) self as *mut T); }
+    }
+}
+
+impl<T: Sized> CoreLocalItem for Option<&'static mut T> {
+    #[inline(always)]
+    fn core_local_read(variable: &CoreLocal<Self>) -> Self {
+        let result: *mut T;
+        unsafe { asm!("mov {0:r}, qword ptr gs:[{1}]", out(reg) result, in(reg) variable.offset()); }
+        unsafe { result.as_mut() }
+    }
+    #[inline(always)]
+    fn core_local_write(self, variable: &CoreLocal<Self>) {
+        unsafe { asm!("mov qword ptr gs:[{0}], {1:r}", in(reg) variable.offset(), in(reg) self.map_or(core::ptr::null(), |r| r as *mut T)); }
     }
 }

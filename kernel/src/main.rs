@@ -9,6 +9,7 @@
 #![feature(abi_x86_interrupt)]
 #![feature(thread_local)]
 #![feature(transmutability)]
+#![feature(push_mut)]
 extern crate alloc;
 
 mod drivers;
@@ -26,6 +27,9 @@ mod acpi;
 mod task;
 mod core_local;
 
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::string::String;
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use drivers::time::pit;
@@ -102,6 +106,12 @@ unsafe extern "C" fn kmain() -> ! {
     core_local::init();
 
     drivers::init();
+
+    task::init(kernel_main_task, Box::new("hello, world!".to_owned()));
+}
+
+extern "C" fn kernel_main_task(msg: Box<String>) {
+    debug!("Main task entered: {}", msg);
 
     loop {
         if let Some(ch) = serial::read() {

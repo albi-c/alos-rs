@@ -155,6 +155,10 @@ mod inner {
                 data: self.lock.read()
             }
         }
+
+        pub unsafe fn force_write_unlock(&self) {
+            unsafe { self.lock.force_write_unlock() }
+        }
     }
 }
 
