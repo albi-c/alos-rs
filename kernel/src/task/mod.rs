@@ -10,6 +10,7 @@ use core::ops::{Index, IndexMut};
 use core::ptr::NonNull;
 use crate::{core_local, cpu, println};
 use crate::core_local::core_info;
+use crate::gdt::tss_set_kernel_stack;
 use crate::lock::{Lock, RwLockGuardMut};
 use crate::memory::{address, MemoryFlags, MemorySpace};
 
@@ -100,9 +101,9 @@ core_local!(#no_mangle CURRENT_TASK: usize = 0);
 
 fn prepare_task_switch(task: &mut Task) {
     cpu::disable_interrupts();
-    // set memory space once implemented
-    // set kernel stack in tss
-    // set kernel stack in core header
+    // set memory space (once implemented)
+    tss_set_kernel_stack(task.kernel_stack_start.as_ptr() as u64);
+    // set kernel stack in core header (once syscalls implemented)
     task.core = core_info().id;
 }
 

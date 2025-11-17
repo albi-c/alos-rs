@@ -108,7 +108,10 @@ unsafe extern "C" fn kmain() -> ! {
     pit::init();
     let memory_values = memory::init();
     core_local::init();
+
+    // call on all cores when SMP is added
     memory::init_core_local(memory_values);
+    gdt::init_core_local();
 
     drivers::init();
 
