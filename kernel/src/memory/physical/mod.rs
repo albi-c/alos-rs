@@ -14,6 +14,7 @@ use crate::memory::physical::map::{MapEntry, MemoryMap};
 
 logger!("PMM");
 
+// TODO: lock shared pages when calling new()
 #[derive(Debug)]
 pub struct PhysicalMemorySpace {
     pub map: &'static mut MemoryMap,

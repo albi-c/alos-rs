@@ -1,6 +1,6 @@
 use core::arch::global_asm;
 use crate::cpu::{msr_read, msr_write};
-use crate::println;
+use crate::{print, println};
 
 const MSR_EFER: u32 = 0xc0000080;
 const MSR_STAR: u32 = 0xc0000081;
@@ -17,7 +17,32 @@ unsafe extern "C" {
 #[unsafe(no_mangle)]
 extern "C" fn syscall_entry(call_number: u64, p1: u64, p2: u64, p3: u64, p4: u64, p5: u64) -> u64 {
     println!("system call [{:}] {:#x} {:#x} {:#x} {:#x} {:#x}", call_number, p1, p2, p3, p4, p5);
-    0
+    match call_number {
+        1 => {
+            let file = p1;
+            let buf = p2 as *const u8;
+            let count = p3 as usize;
+            // TODO: verify if memory is valid!
+            if file != 1 && file != 2 {
+                println!("no file");
+                -1i64 as u64
+            } else {
+                let string = unsafe { core::str::from_utf8(core::slice::from_raw_parts(buf, count)) };
+                if let Ok(string) = string {
+                    print!("{}", string);
+                    count as u64
+                } else {
+                    println!("invalid utf8");
+                    -2i64 as u64
+                }
+            }
+        },
+        2 => {
+            println!("exit");
+            0
+        },
+        _ => -3i64 as u64,
+    }
 }
 
 pub fn init() {
