@@ -4,10 +4,11 @@ pub mod map;
 
 use core::cell::Cell;
 use core::cmp::{max, min};
+use core::ops::Range;
 use limine::memory_map::{Entry, EntryType};
 use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse};
 use crate::{debug, logger};
-use crate::memory::{address, hhdm};
+use crate::memory::{address, alloc_page, alloc_page_zeroed, hhdm};
 use crate::memory::physical::allocator::MemoryAllocator;
 use crate::memory::physical::map::{MapEntry, MemoryMap};
 
@@ -16,6 +17,30 @@ logger!("PMM");
 #[derive(Debug)]
 pub struct PhysicalMemorySpace {
     pub map: &'static mut MemoryMap,
+}
+
+impl PhysicalMemorySpace {
+    fn new_range(&mut self, range: Range<usize>) -> Self {
+        let map: &mut MemoryMap = unsafe { hhdm::as_mut_ref(alloc_page_zeroed().unwrap()) };
+        for i in range {
+            let flags = if i < 256 {
+                MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE | MapEntry::FLAG_USER
+            } else {
+                MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE
+            };
+            *map.at(i) = MapEntry::from_map_with_flags(self.map.map_or_insert(
+                i, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) }), flags);
+        }
+        PhysicalMemorySpace { map }
+    }
+
+    pub fn new_same_user(&mut self) -> Self {
+        self.new_range(0..512)
+    }
+
+    pub fn new(&mut self) -> Self {
+        self.new_range(256..512)
+    }
 }
 
 struct EarlyAllocator {

@@ -2,16 +2,17 @@ use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::arch::global_asm;
 use core::mem::offset_of;
 use core::ops::{Index, IndexMut};
 use core::ptr::NonNull;
-use crate::{core_local, cpu, println};
+use crate::{core_local, cpu};
 use crate::core_local::core_info;
 use crate::gdt::tss_set_kernel_stack;
-use crate::lock::{Lock, RwLockGuardMut};
+use crate::lock::Lock;
 use crate::memory::{address, MemoryFlags, MemorySpace};
 
 const KERNEL_STACK_SIZE: usize = 1 << 16;
@@ -24,6 +25,8 @@ unsafe extern "C" {
     fn _task_switch(task: &mut Task, current: &mut Task);
     #[allow(improper_ctypes)]
     fn _task_switch_continue(task: &mut Task) -> !;
+
+    fn _switch_to_ring_3(func: u64, stack: NonNull<u8>) -> !;
 }
 
 #[unsafe(no_mangle)]
@@ -101,7 +104,7 @@ core_local!(#no_mangle CURRENT_TASK: usize = 0);
 
 fn prepare_task_switch(task: &mut Task) {
     cpu::disable_interrupts();
-    // set memory space (once implemented)
+    task.memory_space.clone().make_current();
     tss_set_kernel_stack(task.kernel_stack_start.as_ptr() as u64);
     // set kernel stack in core header (once syscalls implemented)
     task.core = core_info().id;
@@ -147,20 +150,24 @@ extern "C" fn kernel_stack_underflow() -> ! {
 #[derive(Debug)]
 #[repr(C)]
 pub struct Task {
-    kernel_stack: NonNull<u8>,
-    kernel_stack_base: NonNull<u8>,
-    kernel_stack_start: NonNull<u8>,
+    pub kernel_stack: NonNull<u8>,
+    pub kernel_stack_base: NonNull<u8>,
+    pub kernel_stack_start: NonNull<u8>,
 
-    time: usize,
-    core: usize,
+    pub user_stack: *mut u8,
+    pub user_stack_base: *mut u8,
 
-    id: usize,
-    state: TaskState,
-    flags: u32,
+    pub time: usize,
+    pub core: usize,
 
-    name: String,
-    next: Option<&'static Task>,
-    files: Vec<FileDescriptor>,
+    pub id: usize,
+    pub state: TaskState,
+    pub flags: u32,
+
+    pub memory_space: Arc<MemorySpace>,
+    pub name: String,
+    pub next: Option<&'static Task>,
+    pub files: Vec<FileDescriptor>,
 }
 
 fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>) -> (NonNull<u8>, NonNull<u8>) {
@@ -180,7 +187,7 @@ fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<
 
     let base = NonNull::new(stack.as_mut_ptr()).unwrap();
     const INIT_VALUES: usize = 4;
-    let offset = stack.len() - (INIT_VALUES + CALLEE_SAVED_REGS + 1);
+    let offset = stack.len() - (INIT_VALUES + CALLEE_SAVED_REGS);
     let top = NonNull::new(&raw mut stack[offset]).unwrap();
     let (func, param) = func.map_or(
         (0, 0), |(func, param)| (func as usize, Box::leak(param) as *mut _ as usize));
@@ -194,17 +201,41 @@ fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<
     (top.cast(), base.cast())
 }
 
+fn allocate_user_stack(mem: &MemorySpace, size: usize) -> (NonNull<u8>, NonNull<u8>) {
+    let size = address::page_align_up(size);
+    let base = {
+        let pages = address::page_count_up(size);
+        let phys_addr = mem.user_phys_alloc(pages).expect("out of physical memory");
+        let virt_addr = mem.user_virt_alloc(pages).expect("no user virtual memory space");
+        mem.map_flag_func(phys_addr, virt_addr, pages, |i| if i == 0 {
+            MemoryFlags::DEFAULT_RO | MemoryFlags::USER
+        } else {
+            MemoryFlags::DEFAULT_RW | MemoryFlags::USER
+        });
+        NonNull::new(virt_addr as *mut u8).unwrap()
+    };
+
+    let top = unsafe { base.byte_add(size) };
+    (top, base)
+}
+
+pub fn switch_to_ring_3(func: u64) -> ! {
+    let stack = Task::with_current(|task| NonNull::new(task.user_stack).unwrap());
+    unsafe { _switch_to_ring_3(func, stack) }
+}
+
+// TODO: drop implementation for stacks
 impl Task {
     pub const FLAG_KERNEL: u32 = 1 << 0;
     pub const FLAG_IDLE: u32 = 1 << 1;
 
-    const fn check_kernel_stack_struct_offset() {
+    const fn check_struct_offsets() {
         assert!(offset_of!(Task, kernel_stack) == 0);
-        assert!(offset_of!(Task, id) == 40);
+        assert!(offset_of!(Task, id) == 56);
     }
 
     pub fn new_kernel<T: Sized>(func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>, name: String) -> Box<Self> {
-        const { Self::check_kernel_stack_struct_offset() };
+        const { Self::check_struct_offsets() };
 
         let is_idle = func.is_none();
         let (kernel_stack, kernel_stack_base) = allocate_kernel_stack(
@@ -214,6 +245,9 @@ impl Task {
             kernel_stack_base,
             kernel_stack_start: kernel_stack,
 
+            user_stack: core::ptr::null_mut(),
+            user_stack_base: core::ptr::null_mut(),
+
             time: 0,
             core: 0,
 
@@ -221,6 +255,37 @@ impl Task {
             state: TaskState::Ready,
             flags: Self::FLAG_KERNEL | if is_idle { Self::FLAG_IDLE } else { 0 },
 
+            memory_space: MemorySpace::get().new(None),
+            name,
+            next: None,
+            files: vec![],
+        })
+    }
+
+    pub fn new_user<T: Sized>(func: (extern "C" fn(Box<T>) -> !, Box<T>), name: String,
+                              memory_space: Arc<MemorySpace>, stack_size: usize) -> Box<Self> {
+        const { Self::check_struct_offsets() };
+
+        let (kernel_stack, kernel_stack_base) = allocate_kernel_stack(
+            KERNEL_STACK_SIZE, Some(func));
+        let (user_stack, user_stack_base) = allocate_user_stack(
+            &memory_space, stack_size);
+        Box::new(Self {
+            kernel_stack,
+            kernel_stack_base,
+            kernel_stack_start: kernel_stack,
+
+            user_stack: user_stack.as_ptr(),
+            user_stack_base: user_stack_base.as_ptr(),
+
+            time: 0,
+            core: 0,
+
+            id: 0,
+            state: TaskState::Ready,
+            flags: 0,
+
+            memory_space,
             name,
             next: None,
             files: vec![],
@@ -233,5 +298,16 @@ impl Task {
 
     pub fn current() -> usize {
         CURRENT_TASK.read()
+    }
+
+    pub fn with_current<T>(func: impl FnOnce(&Task) -> T) -> T {
+        let lock = TASKS.read();
+        let task = lock.get(CURRENT_TASK.read()).unwrap();
+        func(task)
+    }
+    pub fn with_current_mut<T>(func: impl FnOnce(&mut Task) -> T) -> T {
+        let mut lock = TASKS.write();
+        let task = lock.get_mut(CURRENT_TASK.read()).unwrap();
+        func(task)
     }
 }

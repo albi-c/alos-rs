@@ -5,10 +5,11 @@ mod space;
 mod virt;
 mod slab;
 
+use alloc::sync::Arc;
 use core::arch::asm;
 use core::ops::BitOr;
 use limine::request::{ExecutableAddressRequest, HhdmRequest, MemoryMapRequest};
-use crate::{core_local, print, println};
+use crate::core_local;
 use crate::lock::Lock;
 use crate::memory::physical::buddy_allocator::BuddyAllocator;
 use crate::memory::physical::{MemoryManager, PhysicalMemorySpace};
@@ -57,17 +58,43 @@ impl BitOr for MemoryFlags {
     }
 }
 
+#[derive(Debug)]
 pub struct MemorySpace {
-    phys: PhysicalMemorySpace,
-    virt_kernel: VirtualMemorySpace,
+    phys: Lock<PhysicalMemorySpace>,
+    virt_kernel: Arc<Lock<VirtualMemorySpace>>,
+    virt_user: Option<Arc<Lock<VirtualMemorySpace>>>,
 }
 
 impl MemorySpace {
-    pub unsafe fn get() -> &'static mut Self {
-        MEMORY_SPACE.get_mut()
+    pub fn new_same_user(&self) -> Arc<Self> {
+        Arc::new(Self {
+            phys: Lock::new(self.phys.write().new_same_user()),
+            virt_kernel: self.virt_kernel.clone(),
+            virt_user: self.virt_user.clone(),
+        })
     }
-    pub fn with<T>(func: impl FnOnce(&mut Self) -> T) -> T {
-        func(unsafe { Self::get() })
+    pub fn new_new_user(&self) -> Arc<Self> {
+        self.new(Some(VirtualMemorySpace::new(0x1000, 0x800000000000 - 0x1000)))
+    }
+    pub fn new(&self, virt_user: Option<VirtualMemorySpace>) -> Arc<Self> {
+        Arc::new(Self {
+            phys: Lock::new(self.phys.write().new()),
+            virt_kernel: self.virt_kernel.clone(),
+            virt_user: virt_user.map(|virt| Arc::new(Lock::new(virt))),
+        })
+    }
+
+    pub fn make_current(self: Arc<Self>) {
+        let addr = self.phys.write().map.addr();
+        *MEMORY_SPACE.get_mut() = self;
+        Self::set_cr3(addr as u64);
+    }
+
+    pub fn get() -> &'static Arc<Self> {
+        MEMORY_SPACE.get()
+    }
+    pub fn with<T>(func: impl FnOnce(&Self) -> T) -> T {
+        func(&Self::get())
     }
 
     pub fn phys_alloc(&self, count: usize) -> Option<usize> {
@@ -87,44 +114,72 @@ impl MemorySpace {
         }
     }
 
-    pub fn virt_alloc(&mut self, count: usize) -> usize {
-        self.virt_kernel.allocate(count * address::PAGE_SIZE).expect("out of virtual memory")
+    pub fn user_phys_alloc(&self, count: usize) -> Option<usize> {
+        let addr = self.phys_alloc(count)?;
+        unsafe { hhdm::as_ptr::<u8>(addr).write_bytes(0, address::PAGE_SIZE * count); }
+        Some(addr)
     }
-    pub fn virt_dealloc(&mut self, addr: usize, count: usize) -> Option<usize> {
-        self.virt_kernel.deallocate(addr, count * address::PAGE_SIZE)
+    pub fn user_phys_dealloc(&self, addr: usize, count: usize) {
+        self.phys_dealloc(addr, count);
     }
 
-    pub fn map(&mut self, phys: usize, virt: usize, count: usize, flags: MemoryFlags) {
-        self.map_flag_func(phys, virt, count, |_| flags);
-        // assert!(address::is_page_aligned(phys));
-        // assert!(address::is_page_aligned(virt));
-        // assert!(count > 0);
-        // let mut it = self.phys.map.iterate(
-        //     phys, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) });
-        // for i in 0..count {
-        //     let me = it.next();
-        //     *me = MapEntry::new_with_flags(virt + i * address::PAGE_SIZE, flags.0).present();
-        // }
+    pub fn virt_alloc(&self, count: usize) -> usize {
+        self.virt_kernel.write().allocate(count * address::PAGE_SIZE).expect("out of virtual memory")
     }
-    pub fn map_flag_func(&mut self, phys: usize, virt: usize, count: usize,
+    pub fn virt_dealloc(&self, addr: usize, count: usize) {
+        self.virt_kernel.write().deallocate(addr, count * address::PAGE_SIZE)
+    }
+
+    pub fn user_virt_alloc(&self, count: usize) -> Option<usize> {
+        Some(self.virt_user.as_ref()?.write().allocate(count * address::PAGE_SIZE).expect("out of virtual memory"))
+    }
+    pub fn user_virt_dealloc(&self, addr: usize, count: usize) -> Option<()> {
+        Some(self.virt_user.as_ref()?.write().deallocate(addr, count * address::PAGE_SIZE))
+    }
+
+    #[inline(always)]
+    fn set_cr3(value: u64) {
+        unsafe {
+            asm!(
+                "mov cr3, {0}",
+                in(reg) value
+            );
+        }
+    }
+
+    #[inline(always)]
+    fn reload_cr3() {
+        unsafe {
+            asm!(
+                "mov {0}, cr3",
+                "mov cr3, {0}",
+                out(reg) _
+            );
+        }
+    }
+
+    fn check_selected_reload_cr3(&self) {
+        if core::ptr::addr_eq(self, MEMORY_SPACE.get()) {
+            Self::reload_cr3();
+        }
+        // IPI when unmapping or changing permissions
+    }
+
+    pub fn map(&self, phys: usize, virt: usize, count: usize, flags: MemoryFlags) {
+        self.map_flag_func(phys, virt, count, |_| flags);
+    }
+    pub fn map_flag_func(&self, phys: usize, virt: usize, count: usize,
                          mut flags: impl FnMut(usize) -> MemoryFlags) {
         assert!(address::is_page_aligned(phys));
         assert!(address::is_page_aligned(virt));
         assert!(count > 0);
-        let mut it = self.phys.map.iterate(
+        let mut phys_lock = self.phys.write();
+        let mut it = phys_lock.map.iterate(
             virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) });
         for i in 0..count {
             let me = it.next();
             *me = MapEntry::new_with_flags(phys + i * address::PAGE_SIZE, flags(i).0).present();
         }
-
-        // unsafe {
-        //     asm!(
-        //         "mov {0}, cr3",
-        //         "mov cr3, {0}",
-        //         out(reg) _
-        //     );
-        // }
     }
     pub fn unmap(&mut self, virt: usize, count: usize) {
         assert!(address::is_page_aligned(virt));
@@ -133,7 +188,7 @@ impl MemorySpace {
     }
 }
 
-core_local!(#late_init MEMORY_SPACE: MemorySpace);
+core_local!(#late_init MEMORY_SPACE: Arc<MemorySpace>);
 
 pub struct InitValues(PhysicalMemorySpace, VirtualMemorySpace);
 
@@ -150,8 +205,12 @@ pub fn init() -> InitValues {
 }
 
 pub fn init_core_local(InitValues(phys, virt_kernel): InitValues) {
-    let space = MemorySpace { phys, virt_kernel };
-    unsafe { MEMORY_SPACE.late_init(space) };
+    let space = MemorySpace {
+        phys: Lock::new(phys),
+        virt_kernel: Arc::new(Lock::new(virt_kernel)),
+        virt_user: None,
+    };
+    unsafe { MEMORY_SPACE.late_init(Arc::new(space)) };
 }
 
 pub fn alloc_page() -> Option<usize> {

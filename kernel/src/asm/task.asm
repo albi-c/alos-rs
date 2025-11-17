@@ -7,6 +7,8 @@
 .global _task_switch
 // fn(&Task) -> !
 .global _task_switch_continue
+// fn(u64, NonNull<u8>)
+.global _switch_to_ring_3
 
 _task_switch:
 	cli
@@ -24,7 +26,7 @@ _task_switch:
 	mov [rsi + 0], rsp
 
 	mov r12, [CURRENT_TASK]
-	mov rsi, [rdi + 40]
+	mov rsi, [rdi + 56]
 	mov gs:[r12], rsi
 
 _task_switch_continue:
@@ -42,3 +44,18 @@ _task_switch_continue:
 	pop rdi
 
 	ret
+
+_switch_to_ring_3:
+	push 0
+
+	cli
+
+	swapgs
+
+	push 0x20 | 0x3
+	push rsi
+	push 0x202
+	push 0x18 | 0x3
+	push rdi
+
+	iretq

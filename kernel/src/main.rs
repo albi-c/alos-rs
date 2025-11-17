@@ -34,6 +34,7 @@ use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use drivers::time::pit;
 use crate::drivers::serial;
+use crate::memory::{address, MemoryFlags, MemorySpace};
 use crate::task::Task;
 
 #[used]
@@ -55,7 +56,8 @@ logger!("Kernel");
 
 fn exception_handler(ctx: interrupts::ExcContext) {
     if ctx.user {
-        todo!()
+        warning!("User exception: {:#x?}", ctx);
+        panic!("User exception");
     } else {
         if ctx.exc == 0x8 {
             error!("Double fault - possible page fault at {:#x}", ctx.address);
@@ -118,6 +120,23 @@ unsafe extern "C" fn kmain() -> ! {
     task::init(kernel_main_task, Box::new("hello, world!".to_owned()));
 }
 
+extern "C" fn user_task() {
+    // unsafe { *(8 as *mut u64) = 0; }
+    loop {}
+}
+
+extern "C" fn user_start_task(_: Box<()>) -> ! {
+    let func_addr = MemorySpace::with(|mem| {
+        let phys_addr = mem.user_phys_alloc(1).unwrap();
+        let virt_addr = mem.user_virt_alloc(1).unwrap();
+        mem.map(phys_addr, virt_addr, 1, MemoryFlags::WRITE | MemoryFlags::USER);
+        unsafe { core::ptr::copy_nonoverlapping(user_task as extern "C" fn() as *const u8, virt_addr as *mut u8, address::PAGE_SIZE) };
+        virt_addr
+    });
+
+    task::switch_to_ring_3(func_addr as u64)
+}
+
 extern "C" fn kernel_side_task(task: Box<usize>) -> ! {
     debug!("Side task entered");
 
@@ -131,11 +150,18 @@ extern "C" fn kernel_side_task(task: Box<usize>) -> ! {
 extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
     debug!("Main task entered: {}", msg);
 
-    let task = Task::new_kernel(Some((kernel_side_task, Box::new(Task::current()))), "side".to_owned());
+    let task = Task::new_kernel(
+        Some((kernel_side_task, Box::new(Task::current()))), "side".to_owned());
     let id = task.add_to_tasks();
     task::task_switch(id).unwrap();
 
     debug!("Main task continues");
+
+    let space = MemorySpace::get().new_new_user();
+    let task = Task::new_user(
+        (user_start_task, Box::new(())), "user".to_owned(), space, 1 << 16);
+    let id = task.add_to_tasks();
+    task::task_switch(id).unwrap();
 
     loop {
         if let Some(ch) = serial::read() {

@@ -227,8 +227,12 @@ impl MemoryMap {
 
     pub fn map_or_insert(&mut self, index: usize,
                          alloc: impl FnOnce() -> &'static mut MemoryMap) -> &'static mut MemoryMap {
-        // TODO: FLAG_USER for lower half
-        self.map_or_insert_with_flags(index, MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE, alloc)
+        let flags = if index < 256 {
+            MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE | MapEntry::FLAG_USER
+        } else {
+            MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE
+        };
+        self.map_or_insert_with_flags(index, flags, alloc)
     }
 
     pub fn map_or_insert_with_flags(&mut self, index: usize, flags: u64,

@@ -100,27 +100,43 @@ pub struct InterruptStackFrame {
 fn default_irq_handler(_: IrqContext) {}
 fn default_exc_handler(_: ExcContext) {}
 
+const USER_CS: u16 = 0x18 | 0x3;
+
 #[unsafe(no_mangle)]
 pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u16) {
+    let user = frame.cs == USER_CS;
+    if user {
+        unsafe { asm!("swapgs", options(nostack, nomem, preserves_flags)); }
+    }
     let ctx = IrqContext {
         irq,
         flags: frame.flags,
     };
     (unsafe { core::mem::transmute::<_, IrqHandler>(HANDLERS[irq as usize]) })(ctx);
+    if user {
+        unsafe { asm!("swapgs", options(nostack, nomem, preserves_flags)); }
+    }
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn exc_handler(frame: &InterruptStackFrame, exc: u16, error_code: u64) {
     let cr2: u64;
     unsafe { asm!("mov {0}, cr2", "mov cr2, {1}", out(reg) cr2, in(reg) 0u64) };
+    let user = frame.cs == USER_CS;
+    if user {
+        unsafe { asm!("swapgs", options(nostack, nomem, preserves_flags)); }
+    }
     let ctx = ExcContext {
         exc,
         error: error_code,
         address: cr2,
         instruction: frame.ip,
-        user: frame.cs == 0x18,
+        user,
         flags: frame.flags,
     };
     (unsafe { core::mem::transmute::<_, ExcHandler>(HANDLERS[exc as usize]) })(ctx);
+    if user {
+        unsafe { asm!("swapgs", options(nostack, nomem, preserves_flags)); }
+    }
 }
 
 pub fn init(mask: u16) {

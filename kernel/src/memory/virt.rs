@@ -50,7 +50,8 @@ impl VirtualMemorySpace {
         Some(base)
     }
     
-    pub fn deallocate(&mut self, base: usize, size: usize) -> Option<usize> {
+    pub fn deallocate(&mut self, base: usize, size: usize) {
+        // TODO: callback for physical memory deallocation
         assert!(address::is_page_aligned(base));
         assert!(address::is_page_aligned(size));
         let end = base + size;
@@ -61,6 +62,5 @@ impl VirtualMemorySpace {
             }
             todo!()
         }
-        None
     }
 }
