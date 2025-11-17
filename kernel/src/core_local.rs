@@ -16,9 +16,16 @@ const MSR_KERNEL_GS_BASE: u32 = 0xc0000102;
 pub struct CoreInfo {
     pub core_local_data: NonNull<u8>,
     pub id: usize,
+    pub syscall_kernel_stack: Cell<NonNull<u8>>,
+    pub syscall_buffer: usize,
 }
 
 pub fn init() {
+    const {
+        assert!(offset_of!(CoreInfo, syscall_kernel_stack) == 16);
+        assert!(offset_of!(CoreInfo, syscall_buffer) == 24);
+    }
+
     let mut offset = size_of::<CoreInfo>();
     for (init_offset, _) in linker_set_slice!(core_locals) {
         init_offset(&mut offset);
@@ -30,6 +37,8 @@ pub fn init() {
     unsafe { (p as *mut CoreInfo).write(CoreInfo {
         core_local_data: NonNull::new(p as *mut u8).unwrap(),
         id: 0,
+        syscall_kernel_stack: Cell::new(NonNull::dangling()),
+        syscall_buffer: 0,
     }); }
     for (_, init_value) in linker_set_slice!(core_locals) {
         init_value();

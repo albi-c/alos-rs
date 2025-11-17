@@ -106,7 +106,7 @@ fn prepare_task_switch(task: &mut Task) {
     cpu::disable_interrupts();
     task.memory_space.clone().make_current();
     tss_set_kernel_stack(task.kernel_stack_start.as_ptr() as u64);
-    // set kernel stack in core header (once syscalls implemented)
+    core_info().syscall_kernel_stack.set(task.kernel_stack_start);
     task.core = core_info().id;
 }
 

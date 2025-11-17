@@ -22,7 +22,8 @@ impl IdtEntry {
         IdtEntry {
             offset_1: offset as u16,
             selector: 0x08,
-            ist: if i == 8 { 0x1 } else { 0x0 },
+            // NMI, double fault, MCE have a special stack
+            ist: if i == 2 || i == 8 || i == 18 { 0x1 } else { 0x0 },
             type_attr: if trap { 0x8f } else { 0x8e },
             offset_2: (offset >> 16) as u16,
             offset_3: (offset >> 32) as u32,

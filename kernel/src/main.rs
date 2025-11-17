@@ -26,10 +26,12 @@ mod volatile;
 mod acpi;
 mod task;
 mod core_local;
+mod syscall;
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::String;
+use core::arch::asm;
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use drivers::time::pit;
@@ -115,12 +117,23 @@ unsafe extern "C" fn kmain() -> ! {
     memory::init_core_local(memory_values);
     gdt::init_core_local();
 
+    syscall::init();
+
     drivers::init();
 
     task::init(kernel_main_task, Box::new("hello, world!".to_owned()));
 }
 
 extern "C" fn user_task() {
+    #[inline(always)]
+    fn syscall(number: u64, p1: u64, p2: u64, p3: u64, p4: u64, p5: u64) -> u64 {
+        let result;
+        unsafe { asm!("syscall", inout("rdi") number => _, inout("rsi") p1 => _, inout("rdx") p2 => _, inout("r10") p3 => _, inout("r8") p4 => _, inout("r9") p5 => _, out("rax") result); }
+        result
+    }
+
+    syscall(0, 1, 2, 3, 4, 5);
+    syscall(0, 1, 2, 3, 4, 5);
     // unsafe { *(8 as *mut u64) = 0; }
     loop {}
 }
