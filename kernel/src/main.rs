@@ -57,6 +57,9 @@ fn exception_handler(ctx: interrupts::ExcContext) {
     if ctx.user {
         todo!()
     } else {
+        if ctx.exc == 0x8 {
+            error!("Double fault - possible page fault at {:#x}", ctx.address);
+        }
         panic!("Kernel exception: {:#x?}", ctx);
     }
 }

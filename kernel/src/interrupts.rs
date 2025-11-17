@@ -111,7 +111,7 @@ pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u16) {
 #[unsafe(no_mangle)]
 pub extern "C" fn exc_handler(frame: &InterruptStackFrame, exc: u16, error_code: u64) {
     let cr2: u64;
-    unsafe { asm!("mov {0}, cr2", out(reg) cr2) };
+    unsafe { asm!("mov {0}, cr2", "mov cr2, {1}", out(reg) cr2, in(reg) 0u64) };
     let ctx = ExcContext {
         exc,
         error: error_code,
