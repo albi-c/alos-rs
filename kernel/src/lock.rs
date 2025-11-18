@@ -73,6 +73,8 @@ mod inner {
         pub fn read(&self) -> InterruptLockGuard<T> {
             self.write()
         }
+
+        pub unsafe fn force_write_unlock(&self) {}
     }
 }
 

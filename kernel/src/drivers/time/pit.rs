@@ -1,5 +1,5 @@
 use core::sync::atomic::{AtomicU64, Ordering};
-use crate::{const_port, interrupts};
+use crate::{const_port, interrupts, task};
 use crate::interrupts::IrqContext;
 
 // 1/x seconds
@@ -16,6 +16,7 @@ const_port!(PORT: 0x40, 4);
 
 fn interrupt_handler(_ctx: IrqContext) {
     TICKS.fetch_add(1, Ordering::Relaxed);
+    task::time_tick();
 }
 
 pub fn init() {

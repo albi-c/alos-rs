@@ -1,15 +1,17 @@
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
+use alloc::collections::btree_map::Entry;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::arch::global_asm;
-use core::mem::offset_of;
+use core::mem::{offset_of, ManuallyDrop};
 use core::ops::{Index, IndexMut};
 use core::ptr::NonNull;
-use crate::{core_local, cpu};
+use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::{core_local, cpu, println};
 use crate::core_local::core_info;
 use crate::gdt::tss_set_kernel_stack;
 use crate::lock::Lock;
@@ -34,12 +36,36 @@ unsafe extern "C" fn _task_lock_force_unlock() {
     unsafe { TASKS.force_write_unlock() };
 }
 
+#[derive(Debug)]
+struct ShortVec<T> {
+    first: T,
+    rest: Option<Vec<T>>,
+}
+
+impl<T> ShortVec<T> {
+    pub fn new(item: T) -> Self {
+        Self {
+            first: item,
+            rest: None,
+        }
+    }
+    pub fn push(&mut self, item: T) {
+        self.rest.get_or_insert_default().push(item);
+    }
+    pub fn extend_to(self, queue: &mut VecDeque<T>) {
+        queue.push_back(self.first);
+        if let Some(rest) = self.rest {
+            queue.extend(rest);
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Tasks {
     tasks: Vec<Option<Box<Task>>>,
 
     run_queue: VecDeque<usize>,
-    sleep_queue: BTreeMap<usize, usize>,
+    sleep_queue: BTreeMap<usize, ShortVec<usize>>,
 }
 
 impl Tasks {
@@ -100,7 +126,29 @@ pub enum TaskState {
     Terminated,
 }
 
-core_local!(#no_mangle CURRENT_TASK: usize = 0);
+core_local!(#no_mangle CURRENT_TASK: usize = usize::MAX);
+core_local!(IDLE_TASK: usize = usize::MAX);
+static TIME: AtomicUsize = AtomicUsize::new(0);
+// in time ticks (1 ms)
+const TASK_RUN_TIME: usize = 10;
+
+pub fn time_tick() {
+    let time = TIME.fetch_add(1, Ordering::Relaxed) + 1;
+    if !CURRENT_TASK.initialized() {
+        return;
+    }
+    let task = CURRENT_TASK.read();
+    if task == usize::MAX {
+        return;
+    }
+    if TASKS.read().get(task).unwrap().time <= time {
+        sched_yield();
+    }
+}
+
+pub fn time_now() -> usize {
+    TIME.load(Ordering::Relaxed)
+}
 
 fn prepare_task_switch(task: &mut Task) {
     cpu::disable_interrupts();
@@ -112,7 +160,7 @@ fn prepare_task_switch(task: &mut Task) {
 
 pub fn task_switch(next: usize) -> Result<(), usize> {
     // will be unlocked in _task_switch()
-    let mut lock = TASKS.write();
+    let mut lock = ManuallyDrop::new(TASKS.write());
     let current_id = CURRENT_TASK.read();
     if next == current_id {
         return Ok(());
@@ -122,25 +170,83 @@ pub fn task_switch(next: usize) -> Result<(), usize> {
     let current = current.as_mut().unwrap().as_mut();
     let next = next.as_mut().unwrap().as_mut();
     prepare_task_switch(next);
+    next.time = time_now() + TASK_RUN_TIME;
+    next.state = TaskState::Running;
 
     unsafe { _task_switch(next, current); }
 
     // will be unlocked in _task_switch()
-    core::mem::forget(lock);
     Ok(())
 }
 
 pub fn init<T: Sized>(func: extern "C" fn(Box<T>) -> !, param: Box<T>) -> ! {
     let task = Task::new_kernel(Some((func, param)), "init".to_owned());
-    let id = task.add_to_tasks();
+    let id = task.add_to_tasks(false);
 
     // will be unlocked in _task_switch_continue()
-    let mut lock = TASKS.write();
+    let mut lock = ManuallyDrop::new(TASKS.write());
     let task = lock.get_mut(id).expect("invalid task id for init task");
     prepare_task_switch(task);
-    // set task time
+    task.time = time_now() + TASK_RUN_TIME;
     task.state = TaskState::Running;
+    CURRENT_TASK.write(id);
     unsafe { _task_switch_continue(task) }
+}
+
+fn sched_next(to_run_queue: bool) {
+    let mut lock = TASKS.write();
+    let time = time_now();
+    while let Some(entry) = lock.sleep_queue.first_entry() {
+        if *entry.key() > time {
+            break;
+        }
+        let (_, tasks) = entry.remove_entry();
+        tasks.extend_to(&mut lock.run_queue);
+    }
+    if let Some(next) = lock.run_queue.pop_front() {
+        if to_run_queue {
+            lock.run_queue.push_back(CURRENT_TASK.read());
+        }
+        drop(lock);
+        task_switch(next).expect("invalid next task");
+    } else if to_run_queue {
+        drop(lock);
+        return;
+    } else {
+        drop(lock);
+        task_switch(IDLE_TASK.read()).expect("invalid idle task");
+    }
+}
+
+pub fn sched_yield() {
+    sched_next(true);
+}
+
+pub fn sched_sleep(time: usize) {
+    if time == 0 {
+        return;
+    }
+    let mut lock = TASKS.write();
+    match lock.sleep_queue.entry(time_now() + time) {
+        Entry::Vacant(entry) => {
+            entry.insert(ShortVec::new(CURRENT_TASK.read()));
+        },
+        Entry::Occupied(mut entry) => {
+            entry.get_mut().push(CURRENT_TASK.read());
+        },
+    }
+    Task::with_current_mut(|task| {
+        task.state = TaskState::Blocked;
+    });
+    sched_next(false);
+}
+
+pub fn sched_exit() {
+    let id = CURRENT_TASK.read();
+    let mut lock = TASKS.write();
+    lock.get_mut(id).unwrap().state = TaskState::Terminated;
+    // TODO: remove from TASKS.tasks
+    sched_next(false);
 }
 
 extern "C" fn kernel_stack_underflow() -> ! {
@@ -292,8 +398,13 @@ impl Task {
         })
     }
 
-    pub fn add_to_tasks(self: Box<Self>) -> usize {
-        TASKS.write().insert(self)
+    pub fn add_to_tasks(self: Box<Self>, add_to_run_queue: bool) -> usize {
+        let mut lock = TASKS.write();
+        let id = lock.insert(self);
+        if add_to_run_queue {
+            lock.run_queue.push_back(id);
+        }
+        id
     }
 
     pub fn current() -> usize {

@@ -14,7 +14,7 @@ rustflags = ["-C", "target-feature=-mmx", "-C", "target-feature=-sse"]
 opt-level = 1
 
 [features]
-default = ["smp"]
+default = []
 smp = []
 
 [dependencies]

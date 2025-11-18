@@ -5,6 +5,7 @@ use core::cell::Cell;
 use core::marker::PhantomData;
 use core::mem::offset_of;
 use core::ptr::NonNull;
+use core::sync::atomic::AtomicBool;
 use crate::{linker_set_declare, linker_set_slice};
 use crate::cpu::msr_write;
 
@@ -19,6 +20,8 @@ pub struct CoreInfo {
     pub syscall_kernel_stack: Cell<NonNull<u8>>,
     pub syscall_buffer: usize,
 }
+
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 pub fn init() {
     const {
@@ -44,6 +47,7 @@ pub fn init() {
         init_value();
     }
     core::mem::forget(mem);
+    INITIALIZED.store(true, core::sync::atomic::Ordering::Release);
 }
 
 #[inline(always)]
@@ -79,7 +83,7 @@ impl<T> CoreLocal<T> {
 
     #[inline(always)]
     pub fn initialized(&self) -> bool {
-        self.offset() != 0
+        INITIALIZED.load(core::sync::atomic::Ordering::Acquire)
     }
 
     #[inline(always)]

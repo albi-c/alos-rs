@@ -36,7 +36,7 @@ use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker
 use drivers::time::pit;
 use crate::drivers::serial;
 use crate::memory::{address, MemoryFlags, MemorySpace};
-use crate::task::Task;
+use crate::task::{sched_yield, Task};
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -124,6 +124,8 @@ unsafe extern "C" fn kmain() -> ! {
 }
 
 extern "C" fn user_start_task(_: Box<()>) -> ! {
+    debug!("User start task entered");
+
     let func_addr = MemorySpace::with(|mem| {
         let program_data = include_bytes!("../../test_program.bin");
         let pages = address::page_count_up(program_data.len());
@@ -137,34 +139,34 @@ extern "C" fn user_start_task(_: Box<()>) -> ! {
     task::switch_to_ring_3(func_addr as u64)
 }
 
-extern "C" fn kernel_side_task(task: Box<usize>) -> ! {
+extern "C" fn kernel_side_task(_: Box<()>) -> ! {
     debug!("Side task entered");
 
-    task::task_switch(*task).unwrap();
-
-    debug!("Side task continues");
-
-    loop {}
+    loop {
+        sched_yield();
+    }
 }
 
 extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
     debug!("Main task entered: {}", msg);
 
     let task = Task::new_kernel(
-        Some((kernel_side_task, Box::new(Task::current()))), "side".to_owned());
-    let id = task.add_to_tasks();
-    task::task_switch(id).unwrap();
+        Some((kernel_side_task, Box::new(()))), "side".to_owned());
+    let id = task.add_to_tasks(true);
+    println!("Side task id: {}", id);
+    sched_yield();
 
     debug!("Main task continues");
 
     let space = MemorySpace::get().new_new_user();
     let task = Task::new_user(
         (user_start_task, Box::new(())), "user".to_owned(), space, 1 << 16);
-    let id = task.add_to_tasks();
-    task::task_switch(id).unwrap();
+    let id = task.add_to_tasks(true);
+    println!("User task id: {}", id);
+    sched_yield();
 
     loop {
-        if let Some(ch) = serial::read() {
+        while let Some(ch) = serial::read() {
             match ch {
                 13 => println!(),
                 27 => if serial::read() == Some(91) {
@@ -182,6 +184,7 @@ extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
                 _ => print!("{}", ch as char),
             }
         }
+        sched_yield();
     }
 }
 
