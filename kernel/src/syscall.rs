@@ -15,8 +15,7 @@ unsafe extern "C" {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn syscall_entry(call_number: u64, p1: u64, p2: u64, p3: u64, p4: u64, p5: u64) -> u64 {
-    println!("system call [{:}] {:#x} {:#x} {:#x} {:#x} {:#x}", call_number, p1, p2, p3, p4, p5);
+extern "C" fn syscall_entry(call_number: u64, p1: u64, p2: u64, p3: u64, p4: u64, p5: u64, p6: u64) -> u64 {
     match call_number {
         1 => {
             let file = p1;
@@ -24,7 +23,7 @@ extern "C" fn syscall_entry(call_number: u64, p1: u64, p2: u64, p3: u64, p4: u64
             let count = p3 as usize;
             // TODO: verify if memory is valid!
             if file != 1 && file != 2 {
-                println!("no file");
+                println!("[syscall] no file");
                 -1i64 as u64
             } else {
                 let string = unsafe { core::str::from_utf8(core::slice::from_raw_parts(buf, count)) };
@@ -32,16 +31,20 @@ extern "C" fn syscall_entry(call_number: u64, p1: u64, p2: u64, p3: u64, p4: u64
                     print!("{}", string);
                     count as u64
                 } else {
-                    println!("invalid utf8");
+                    println!("[syscall] invalid utf8");
                     -2i64 as u64
                 }
             }
         },
         2 => {
-            println!("exit");
+            println!("[syscall] exit with code {}", p1);
             0
         },
-        _ => -3i64 as u64,
+        _ => {
+            println!("[syscall] [{}] {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}",
+                     call_number, p1, p2, p3, p4, p5, p6);
+            -3i64 as u64
+        },
     }
 }
 

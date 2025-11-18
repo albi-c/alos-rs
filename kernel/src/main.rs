@@ -31,7 +31,6 @@ mod syscall;
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::String;
-use core::arch::asm;
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use drivers::time::pit;

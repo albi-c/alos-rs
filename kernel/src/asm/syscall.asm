@@ -2,8 +2,8 @@
 
 .global _syscall_entry
 
-// number in rdi
-// arguments in rsi, rdx, r10, r8, r9
+// number in rax
+// arguments in rdi, rsi, rdx, r8, r9, r10
 _syscall_entry:
 	swapgs
 	mov gs:[24], rsp
@@ -11,23 +11,26 @@ _syscall_entry:
 
 	pushfq
 	push rcx
-	push r10
 	push r11
 	push r12
-	mov rcx, r10
+	push r10
 
 	mov r12, gs:[24]
 	sti
 	cld
 
+    mov rcx, rdx
+    mov rdx, rsi
+    mov rsi, rdi
+    mov rdi, rax
 	call syscall_entry
 
 	cli
 	mov gs:[24], r12
 
+    pop r10
 	pop r12
 	pop r11
-	pop r10
 	xor r9d, r9d
 	xor r8d, r8d
 	xor esi, esi

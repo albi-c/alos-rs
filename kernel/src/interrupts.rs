@@ -1,6 +1,6 @@
 use core::arch::asm;
 use macros::{interrupt_handlers, interrupt_handlers_arr};
-use crate::{cpu, println};
+use crate::cpu;
 use crate::lock::Lock;
 use crate::ports::Port;
 
