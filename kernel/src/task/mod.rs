@@ -14,7 +14,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::{core_local, cpu};
 use crate::core_local::core_info;
 use crate::gdt::tss_set_kernel_stack;
-use crate::lock::Lock;
+use crate::lock::{InterruptLockGuard, Lock};
 use crate::memory::{address, MemoryFlags, MemorySpace};
 
 const KERNEL_STACK_SIZE: usize = 1 << 16;
@@ -66,6 +66,7 @@ struct Tasks {
 
     run_queue: VecDeque<usize>,
     sleep_queue: BTreeMap<usize, ShortVec<usize>>,
+    delete_queue: Vec<usize>,
 }
 
 impl Tasks {
@@ -93,6 +94,12 @@ impl Tasks {
         task.id = id;
         id
     }
+
+    fn delete_tasks(&mut self) {
+        for task in self.delete_queue.drain(..) {
+            self.tasks[task].take().map(Task::delete);
+        }
+    }
 }
 
 impl Index<usize> for Tasks {
@@ -112,12 +119,13 @@ static TASKS: Lock<Tasks> = Lock::new(Tasks {
 
     run_queue: VecDeque::new(),
     sleep_queue: BTreeMap::new(),
+    delete_queue: Vec::new(),
 });
 
 #[derive(Debug)]
 pub struct FileDescriptor {}
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u32)]
 pub enum TaskState {
     Running,
@@ -163,25 +171,26 @@ fn prepare_task_switch(task: &mut Task) {
     task.core = core_info().id;
 }
 
-pub fn task_switch(next: usize) -> Result<(), usize> {
+fn task_switch_with_lock(next: usize, lock: InterruptLockGuard<Tasks>) {
     // will be unlocked in _task_switch()
-    let mut lock = ManuallyDrop::new(TASKS.write());
+    let mut lock = ManuallyDrop::new(lock);
     let current_id = CURRENT_TASK.read();
     if next == current_id {
-        return Ok(());
+        return;
     }
     let [current, next] = lock.get_disjoint_mut(
-        [current_id, next]).expect("invalid task id");
-    let current = current.as_mut().unwrap().as_mut();
-    let next = next.as_mut().unwrap().as_mut();
+        [current_id, next]).expect("task_switch_with_lock: identical task ids (unreachable)");
+    let current = current.as_mut().expect("invalid current task id").as_mut();
+    let next = next.as_mut().expect("invalid next task id").as_mut();
     prepare_task_switch(next);
     next.time = time_now() + TASK_RUN_TIME;
     next.state = TaskState::Running;
 
     unsafe { _task_switch(next, current); }
+}
 
-    // will be unlocked in _task_switch()
-    Ok(())
+pub fn task_switch(next: usize) {
+    task_switch_with_lock(next, TASKS.write())
 }
 
 pub fn init<T: Sized>(func: extern "C" fn(Box<T>) -> !, param: Box<T>) -> ! {
@@ -198,8 +207,10 @@ pub fn init<T: Sized>(func: extern "C" fn(Box<T>) -> !, param: Box<T>) -> ! {
     unsafe { _task_switch_continue(task) }
 }
 
-fn sched_next(to_run_queue: bool) {
-    let mut lock = TASKS.write();
+fn sched_next_with_lock(to_run_queue: bool, mut lock: InterruptLockGuard<Tasks>, do_delete: bool) {
+    if do_delete {
+        lock.delete_tasks();
+    }
     let time = time_now();
     while let Some(entry) = lock.sleep_queue.first_entry() {
         if *entry.key() > time {
@@ -212,15 +223,17 @@ fn sched_next(to_run_queue: bool) {
         if to_run_queue {
             lock.run_queue.push_back(CURRENT_TASK.read());
         }
-        drop(lock);
-        task_switch(next).expect("invalid next task");
+        task_switch_with_lock(next, lock);
     } else if to_run_queue {
         drop(lock);
         return;
     } else {
-        drop(lock);
-        task_switch(IDLE_TASK.read()).expect("invalid idle task");
+        task_switch_with_lock(IDLE_TASK.read(), lock);
     }
+}
+
+fn sched_next(to_run_queue: bool) {
+    sched_next_with_lock(to_run_queue, TASKS.write(), true)
 }
 
 pub fn sched_yield() {
@@ -246,12 +259,13 @@ pub fn sched_sleep(time: usize) {
     sched_next(false);
 }
 
-pub fn sched_exit() {
-    let id = CURRENT_TASK.read();
+pub fn sched_exit() -> ! {
     let mut lock = TASKS.write();
+    let id = CURRENT_TASK.read();
     lock.get_mut(id).unwrap().state = TaskState::Terminated;
-    // TODO: remove from TASKS.tasks
-    sched_next(false);
+    lock.delete_queue.push(id);
+    sched_next_with_lock(false, lock, false);
+    panic!("sched_exit: unreachable");
 }
 
 extern "C" fn kernel_stack_underflow() -> ! {
@@ -275,9 +289,12 @@ pub struct Task {
     pub state: TaskState,
     pub flags: u32,
 
+    pub kernel_stack_size: usize,
+    pub user_stack_size: usize,
+
     pub memory_space: Arc<MemorySpace>,
     pub name: String,
-    pub next: Option<&'static Task>,
+    pub next: Option<usize>,
     pub files: Vec<FileDescriptor>,
 }
 
@@ -335,7 +352,6 @@ pub fn switch_to_ring_3(func: u64) -> ! {
     unsafe { _switch_to_ring_3(func, stack) }
 }
 
-// TODO: drop implementation for stacks
 impl Task {
     pub const FLAG_KERNEL: u32 = 1 << 0;
     pub const FLAG_IDLE: u32 = 1 << 1;
@@ -365,6 +381,9 @@ impl Task {
             id: 0,
             state: TaskState::Ready,
             flags: Self::FLAG_KERNEL | if is_idle { Self::FLAG_IDLE } else { 0 },
+
+            kernel_stack_size: KERNEL_STACK_SIZE,
+            user_stack_size: 0,
 
             memory_space: MemorySpace::get().new(None),
             name,
@@ -396,6 +415,9 @@ impl Task {
             state: TaskState::Ready,
             flags: 0,
 
+            kernel_stack_size: KERNEL_STACK_SIZE,
+            user_stack_size: stack_size,
+
             memory_space,
             name,
             next: None,
@@ -410,6 +432,13 @@ impl Task {
             lock.run_queue.push_back(id);
         }
         id
+    }
+
+    fn delete(self: Box<Self>) {
+        assert_eq!(self.state, TaskState::Terminated);
+
+        // TODO: free memory space and allocated memory
+        // TODO: close files
     }
 
     pub fn current() -> usize {

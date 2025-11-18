@@ -1,6 +1,7 @@
 use core::arch::global_asm;
 use crate::cpu::{msr_read, msr_write};
 use crate::{print, println};
+use crate::task::sched_exit;
 
 const MSR_EFER: u32 = 0xc0000080;
 const MSR_STAR: u32 = 0xc0000081;
@@ -41,9 +42,9 @@ extern "C" fn syscall_write(file: i32, buf: *const u8, count: usize) -> i64 {
     }
 }
 
-extern "C" fn syscall_exit(code: i64) -> u64 {
+extern "C" fn syscall_exit(code: i64) -> ! {
     println!("[syscall: exit] code {}", code);
-    0
+    sched_exit()
 }
 
 macro_rules! syscall {

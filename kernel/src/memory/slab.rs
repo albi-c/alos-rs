@@ -1,5 +1,6 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::Cell;
+use core::cmp::max;
 use macros::slabs;
 use crate::lock::Lock;
 use crate::memory;
@@ -74,7 +75,7 @@ impl Slabs {
             let addr = memory::alloc_pages(address::page_count_up(size)).expect("Out of memory");
             unsafe { core::slice::from_raw_parts_mut(hhdm::as_ptr(addr), size) }
         } else {
-            let bit_len = usize::BITS - (size - 1).leading_zeros();
+            let bit_len = max(usize::BITS - (size - 1).leading_zeros(), 3);
             self.container.write().allocate(bit_len as usize)
         }
     }
@@ -83,7 +84,7 @@ impl Slabs {
         if size > 2048 {
             memory::dealloc_pages(hhdm::from_ptr(memory.as_ptr()), address::page_count_up(size));
         } else {
-            let bit_len = usize::BITS - (size - 1).leading_zeros();
+            let bit_len = max(usize::BITS - (size - 1).leading_zeros(), 3);
             self.container.write().deallocate(bit_len as usize, unsafe {
                 core::slice::from_raw_parts_mut(memory.as_mut_ptr(), 1 << bit_len) });
         }
@@ -92,11 +93,17 @@ impl Slabs {
 
 unsafe impl GlobalAlloc for Slabs {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if layout.size() == 0 {
+            return core::ptr::dangling_mut();
+        }
         self.allocate(layout.size()).as_mut_ptr()
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let size = layout.size();
+        if size == 0 {
+            return;
+        }
         self.deallocate(size, unsafe { core::slice::from_raw_parts_mut(ptr, size) })
     }
 }
