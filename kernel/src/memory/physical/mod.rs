@@ -5,6 +5,7 @@ pub mod map;
 use core::cell::Cell;
 use core::cmp::{max, min};
 use core::ops::{Deref, DerefMut, Range};
+use core::ptr::NonNull;
 use limine::memory_map::{Entry, EntryType};
 use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse};
 use crate::{debug, logger};
@@ -14,8 +15,6 @@ use crate::memory::physical::allocator::MemoryAllocator;
 use crate::memory::physical::map::{MapEntry, MemoryMap};
 
 logger!("PMM");
-
-// TODO: lock shared pages when calling new()
 
 static MAP_LOCK: Lock<()> = Lock::new(());
 
@@ -39,11 +38,11 @@ impl DerefMut for MemoryMapGuard<'_> {
 
 #[derive(Debug)]
 pub struct PhysicalMemorySpace {
-    map: &'static mut MemoryMap,
+    map: NonNull<MemoryMap>,
 }
 
 impl PhysicalMemorySpace {
-    fn new_range(&mut self, range: Range<usize>) -> Self {
+    fn new_range(&self, range: Range<usize>) -> Self {
         let mut s_map = self.map();
         let map: &mut MemoryMap = unsafe { hhdm::as_mut_ref(alloc_page_zeroed().unwrap()) };
         for i in range {
@@ -55,32 +54,32 @@ impl PhysicalMemorySpace {
             *map.at(i) = MapEntry::from_map_with_flags(s_map.map_or_insert(
                 i, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) }), flags);
         }
-        PhysicalMemorySpace { map }
+        PhysicalMemorySpace { map: map.into() }
     }
 
-    pub fn new_same_user(&mut self) -> Self {
+    pub fn new_same_user(&self) -> Self {
         self.new_range(0..512)
     }
 
-    pub fn new(&mut self) -> Self {
+    pub fn new(&self) -> Self {
         self.new_range(256..512)
     }
 
-    pub fn map(&mut self) -> MemoryMapGuard<'_> {
+    pub fn map(&self) -> MemoryMapGuard<'_> {
         let lock = MAP_LOCK.write();
-        MemoryMapGuard { map: self.map, lock }
+        MemoryMapGuard { map: unsafe { self.map_unsafe() }, lock }
     }
 
-    pub fn with_map<T>(&mut self, func: impl FnOnce(&mut MemoryMap) -> T) -> T {
+    pub fn with_map<T>(&self, func: impl FnOnce(&mut MemoryMap) -> T) -> T {
         let result = func(&mut self.map());
         result
     }
 
-    pub fn map_addr(&mut self) -> usize {
-        self.map.addr()
+    pub fn map_addr(&self) -> usize {
+        unsafe { self.map_unsafe() }.addr()
     }
-    pub unsafe fn map_unsafe(&mut self) -> &mut MemoryMap {
-        self.map
+    pub unsafe fn map_unsafe(&self) -> &'static mut MemoryMap {
+        unsafe { self.map.as_ptr().as_mut().unwrap() }
     }
 }
 
@@ -268,7 +267,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
 
         self.initialized = true;
         
-        PhysicalMemorySpace { map }
+        PhysicalMemorySpace { map: map.into() }
     }
 
     fn allocators(&mut self) -> [&mut A; 2] {

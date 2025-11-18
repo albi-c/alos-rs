@@ -60,7 +60,7 @@ impl BitOr for MemoryFlags {
 
 #[derive(Debug)]
 pub struct MemorySpace {
-    phys: Lock<PhysicalMemorySpace>,
+    phys: PhysicalMemorySpace,
     virt_kernel: Arc<Lock<VirtualMemorySpace>>,
     virt_user: Option<Arc<Lock<VirtualMemorySpace>>>,
 }
@@ -68,7 +68,7 @@ pub struct MemorySpace {
 impl MemorySpace {
     pub fn new_same_user(&self) -> Arc<Self> {
         Arc::new(Self {
-            phys: Lock::new(self.phys.write().new_same_user()),
+            phys: self.phys.new_same_user(),
             virt_kernel: self.virt_kernel.clone(),
             virt_user: self.virt_user.clone(),
         })
@@ -78,14 +78,14 @@ impl MemorySpace {
     }
     pub fn new(&self, virt_user: Option<VirtualMemorySpace>) -> Arc<Self> {
         Arc::new(Self {
-            phys: Lock::new(self.phys.write().new()),
+            phys: self.phys.new(),
             virt_kernel: self.virt_kernel.clone(),
             virt_user: virt_user.map(|virt| Arc::new(Lock::new(virt))),
         })
     }
 
     pub fn make_current(self: Arc<Self>) {
-        let addr = self.phys.write().map_addr();
+        let addr = self.phys.map_addr();
         *MEMORY_SPACE.get_mut() = self;
         Self::set_cr3(addr as u64);
     }
@@ -179,8 +179,7 @@ impl MemorySpace {
         assert!(address::is_page_aligned(phys));
         assert!(address::is_page_aligned(virt));
         assert!(count > 0);
-        let mut phys_lock = self.phys.write();
-        let mut map_lock = phys_lock.map();
+        let mut map_lock = self.phys.map();
         let mut it = map_lock.iterate(
             virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) });
         for i in 0..count {
@@ -213,7 +212,7 @@ pub fn init() -> InitValues {
 
 pub fn init_core_local(InitValues(phys, virt_kernel): InitValues) {
     let space = MemorySpace {
-        phys: Lock::new(phys),
+        phys,
         virt_kernel: Arc::new(Lock::new(virt_kernel)),
         virt_user: None,
     };
