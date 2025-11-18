@@ -1,6 +1,6 @@
 use core::arch::asm;
 use macros::{interrupt_handlers, interrupt_handlers_arr};
-use crate::cpu;
+use crate::{cpu, println};
 use crate::lock::Lock;
 use crate::ports::Port;
 
@@ -101,7 +101,7 @@ pub struct InterruptStackFrame {
 fn default_irq_handler(_: IrqContext) {}
 fn default_exc_handler(_: ExcContext) {}
 
-const USER_CS: u16 = 0x18 | 0x3;
+const USER_CS: u16 = 0x20 | 0x3;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u16) {

@@ -46,7 +46,7 @@ extern "C" fn syscall_entry(call_number: u64, p1: u64, p2: u64, p3: u64, p4: u64
 }
 
 pub fn init() {
-    msr_write(MSR_STAR, ((0x18 | 0x3) << 48) | (0x8 << 32));
+    msr_write(MSR_STAR, ((0x10 | 0x3) << 48) | (0x8 << 32));
     msr_write(MSR_LSTAR, _syscall_entry as u64);
     msr_write(MSR_CSTAR, 0);
     msr_write(MSR_SFMASK, 0x200);

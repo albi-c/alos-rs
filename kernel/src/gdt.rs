@@ -121,10 +121,14 @@ pub fn init() {
             (&raw const CORE_0_TSS) as u64, (size_of::<TSS>() - 1) as u32, 0x89, 0x0);
         CORE_0_GDT = [
             GDT::default(),
+            // kernel code
             GDT::new(0, 0xffffffff, 0x9b, 0xa),
+            // kernel stack
             GDT::new(0, 0xffffffff, 0x93, 0xa),
-            GDT::new(0, 0xffffffff, 0xfb, 0xa),
+            // user stack
             GDT::new(0, 0xffffffff, 0xf3, 0xa),
+            // user code
+            GDT::new(0, 0xffffffff, 0xfb, 0xa),
             tss_low,
             tss_high,
         ];
