@@ -11,7 +11,7 @@ use core::mem::{offset_of, ManuallyDrop};
 use core::ops::{Index, IndexMut};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use crate::{core_local, cpu, println};
+use crate::{core_local, cpu};
 use crate::core_local::core_info;
 use crate::gdt::tss_set_kernel_stack;
 use crate::lock::Lock;
@@ -134,15 +134,20 @@ const TASK_RUN_TIME: usize = 10;
 
 pub fn time_tick() {
     let time = TIME.fetch_add(1, Ordering::Relaxed) + 1;
-    if !CURRENT_TASK.initialized() {
-        return;
+    #[cfg(not(feature = "smp"))] {
+        if !CURRENT_TASK.initialized() {
+            return;
+        }
+        let task = CURRENT_TASK.read();
+        if task == usize::MAX {
+            return;
+        }
+        if TASKS.read().get(task).unwrap().time <= time {
+            sched_yield();
+        }
     }
-    let task = CURRENT_TASK.read();
-    if task == usize::MAX {
-        return;
-    }
-    if TASKS.read().get(task).unwrap().time <= time {
-        sched_yield();
+    #[cfg(feature = "smp")] {
+        const { panic!("smp not supported"); }
     }
 }
 

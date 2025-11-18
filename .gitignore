@@ -3,3 +3,5 @@
 /.idea
 *.iso
 *.hdd
+test_program.o
+test_program.elf

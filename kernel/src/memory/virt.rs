@@ -1,7 +1,6 @@
 use alloc::collections::BTreeMap;
 use core::ops::Bound;
 use crate::memory::address;
-use crate::println;
 
 #[derive(Debug, Copy, Clone)]
 struct MemoryAllocation {
@@ -48,6 +47,40 @@ impl VirtualMemorySpace {
         if rem == 0 {}
         self.data.insert(base + size, MemoryAllocation::free(rem));
         Some(base)
+    }
+
+    pub fn allocate_at(&mut self, addr: usize, size: usize) -> Option<()> {
+        assert!(address::is_page_aligned(addr));
+        assert!(address::is_page_aligned(size));
+        let mut cur = self.data.upper_bound_mut(Bound::Included(&addr));
+        let (&base, entry) = cur.prev()?;
+        let diff = addr - base;
+        if diff == 0 {
+            if entry.length >= size {
+                let rem = entry.length - size;
+                entry.length = size;
+                entry.allocated = true;
+                if rem > 0 {
+                    self.data.insert(base + size, MemoryAllocation::free(rem));
+                }
+                Some(())
+            } else {
+                None
+            }
+        } else {
+            if entry.length - diff >= size {
+                let rest = entry.length - diff;
+                entry.length = diff;
+                let rem = rest - size;
+                self.data.insert(addr, MemoryAllocation::allocated(size));
+                if rem > 0 {
+                    self.data.insert(addr + size, MemoryAllocation::free(rem));
+                }
+                Some(())
+            } else {
+                None
+            }
+        }
     }
     
     pub fn deallocate(&mut self, base: usize, size: usize) {

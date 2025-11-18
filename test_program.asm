@@ -1,27 +1,42 @@
 [bits 64]
 
+section .text
+global _start
 _start:
-    mov rax, 0
-    mov rdi, 1
-    mov rsi, 2
-    mov rdx, 3
-    mov r10, 4
-    mov r8, 5
-    mov r9, 6
+    mov eax, 0
+    mov edi, 1
+    mov esi, 2
+    mov edx, 3
+    mov r10d, 4
+    mov r8d, 5
+    mov r9d, 6
     o64 syscall
 
-	mov rax, 1
-	mov rdi, 1
+    cld
+    lea rdi, [rel message]
+    lea rsi, [rel message_ro]
+    mov ecx, message_ro_end - message_ro
+    rep movsb
+    mov byte [rel message_end - 2], '!'
+
+	mov eax, 1
+	mov edi, 1
 	lea rsi, [rel message]
-	mov rdx, message_end - message
+	mov edx, message_end - message
 	o64 syscall
 
-	mov rax, 2
-	mov rdi, 0
+	mov eax, 2
+	mov edi, 0
 	o64 syscall
 
 	jmp $
 
+section .rodata
+message_ro:
+	db "Hello, World?", 10
+message_ro_end:
+
+section .bss
 message:
-	db "Hello, World!", 10
+	resb (message_ro_end - message_ro)
 message_end:

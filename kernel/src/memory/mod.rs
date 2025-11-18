@@ -131,10 +131,16 @@ impl MemorySpace {
     }
 
     pub fn user_virt_alloc(&self, count: usize) -> Option<usize> {
-        Some(self.virt_user.as_ref()?.write().allocate(count * address::PAGE_SIZE).expect("out of virtual memory"))
+        self.virt_user.as_ref().expect("no user memory space").write()
+            .allocate(count * address::PAGE_SIZE)
+    }
+    pub fn user_virt_alloc_at(&self, addr: usize, count: usize) -> Option<()> {
+        self.virt_user.as_ref().expect("no user memory space").write()
+            .allocate_at(addr, count * address::PAGE_SIZE)
     }
     pub fn user_virt_dealloc(&self, addr: usize, count: usize) -> Option<()> {
-        Some(self.virt_user.as_ref()?.write().deallocate(addr, count * address::PAGE_SIZE))
+        Some(self.virt_user.as_ref().expect("no user memory space").write()
+            .deallocate(addr, count * address::PAGE_SIZE))
     }
 
     #[inline(always)]

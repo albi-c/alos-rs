@@ -27,6 +27,7 @@ mod acpi;
 mod task;
 mod core_local;
 mod syscall;
+mod elf_loader;
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -35,7 +36,8 @@ use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use drivers::time::pit;
 use crate::drivers::serial;
-use crate::memory::{address, MemoryFlags, MemorySpace};
+use crate::elf_loader::ElfError;
+use crate::memory::MemorySpace;
 use crate::task::{sched_yield, Task};
 
 #[used]
@@ -126,15 +128,14 @@ unsafe extern "C" fn kmain() -> ! {
 extern "C" fn user_start_task(_: Box<()>) -> ! {
     debug!("User start task entered");
 
-    let func_addr = MemorySpace::with(|mem| {
-        let program_data = include_bytes!("../../test_program.bin");
-        let pages = address::page_count_up(program_data.len());
-        let phys_addr = mem.user_phys_alloc(pages).unwrap();
-        let virt_addr = mem.user_virt_alloc(pages).unwrap();
-        mem.map(phys_addr, virt_addr, pages, MemoryFlags::WRITE | MemoryFlags::USER);
-        unsafe { core::ptr::copy_nonoverlapping(program_data.as_ptr(), virt_addr as *mut u8, program_data.len()) };
-        virt_addr
-    });
+    let program_data = include_bytes!("../../test_program.elf");
+    let func_addr = match elf_loader::load_elf(program_data) {
+        Ok(addr) => addr,
+        Err(err) => match err {
+            ElfError::Lib(err) => panic!("ELF error: {}", err),
+            ElfError::Err(msg) => panic!("ELF error: {}", msg),
+        }
+    };
 
     task::switch_to_ring_3(func_addr as u64)
 }

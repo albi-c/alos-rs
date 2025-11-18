@@ -63,14 +63,14 @@ mod inner {
     }
     
     impl<T: ?Sized> Lock<T> {
-        pub fn write(&self) -> InterruptLockGuard<T> {
+        pub fn write(&self) -> InterruptLockGuard<'_, T> {
             let guard = InterruptGuard::new();
             InterruptLockGuard {
                 guard,
                 data: unsafe { self.data.as_mut_unchecked() },
             }
         }
-        pub fn read(&self) -> InterruptLockGuard<T> {
+        pub fn read(&self) -> InterruptLockGuard<'_, T> {
             self.write()
         }
 
