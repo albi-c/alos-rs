@@ -4,10 +4,11 @@ pub mod map;
 
 use core::cell::Cell;
 use core::cmp::{max, min};
-use core::ops::Range;
+use core::ops::{Deref, DerefMut, Range};
 use limine::memory_map::{Entry, EntryType};
 use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse};
 use crate::{debug, logger};
+use crate::lock::{InterruptLockGuard, Lock};
 use crate::memory::{address, alloc_page, alloc_page_zeroed, hhdm};
 use crate::memory::physical::allocator::MemoryAllocator;
 use crate::memory::physical::map::{MapEntry, MemoryMap};
@@ -15,13 +16,35 @@ use crate::memory::physical::map::{MapEntry, MemoryMap};
 logger!("PMM");
 
 // TODO: lock shared pages when calling new()
+
+static MAP_LOCK: Lock<()> = Lock::new(());
+
+pub struct MemoryMapGuard<'a> {
+    map: &'a mut MemoryMap,
+    lock: InterruptLockGuard<'a, ()>,
+}
+
+impl Deref for MemoryMapGuard<'_> {
+    type Target = MemoryMap;
+
+    fn deref(&self) -> &Self::Target {
+        self.map
+    }
+}
+impl DerefMut for MemoryMapGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.map
+    }
+}
+
 #[derive(Debug)]
 pub struct PhysicalMemorySpace {
-    pub map: &'static mut MemoryMap,
+    map: &'static mut MemoryMap,
 }
 
 impl PhysicalMemorySpace {
     fn new_range(&mut self, range: Range<usize>) -> Self {
+        let mut s_map = self.map();
         let map: &mut MemoryMap = unsafe { hhdm::as_mut_ref(alloc_page_zeroed().unwrap()) };
         for i in range {
             let flags = if i < 256 {
@@ -29,7 +52,7 @@ impl PhysicalMemorySpace {
             } else {
                 MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE
             };
-            *map.at(i) = MapEntry::from_map_with_flags(self.map.map_or_insert(
+            *map.at(i) = MapEntry::from_map_with_flags(s_map.map_or_insert(
                 i, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) }), flags);
         }
         PhysicalMemorySpace { map }
@@ -41,6 +64,23 @@ impl PhysicalMemorySpace {
 
     pub fn new(&mut self) -> Self {
         self.new_range(256..512)
+    }
+
+    pub fn map(&mut self) -> MemoryMapGuard<'_> {
+        let lock = MAP_LOCK.write();
+        MemoryMapGuard { map: self.map, lock }
+    }
+
+    pub fn with_map<T>(&mut self, func: impl FnOnce(&mut MemoryMap) -> T) -> T {
+        let result = func(&mut self.map());
+        result
+    }
+
+    pub fn map_addr(&mut self) -> usize {
+        self.map.addr()
+    }
+    pub unsafe fn map_unsafe(&mut self) -> &mut MemoryMap {
+        self.map
     }
 }
 

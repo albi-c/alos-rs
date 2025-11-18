@@ -85,7 +85,7 @@ impl MemorySpace {
     }
 
     pub fn make_current(self: Arc<Self>) {
-        let addr = self.phys.write().map.addr();
+        let addr = self.phys.write().map_addr();
         *MEMORY_SPACE.get_mut() = self;
         Self::set_cr3(addr as u64);
     }
@@ -180,7 +180,8 @@ impl MemorySpace {
         assert!(address::is_page_aligned(virt));
         assert!(count > 0);
         let mut phys_lock = self.phys.write();
-        let mut it = phys_lock.map.iterate(
+        let mut map_lock = phys_lock.map();
+        let mut it = map_lock.iterate(
             virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) });
         for i in 0..count {
             let me = it.next();
