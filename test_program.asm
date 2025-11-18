@@ -5,9 +5,9 @@ _start:
     mov rdi, 1
     mov rsi, 2
     mov rdx, 3
-    mov r8, 4
-    mov r9, 5
-    mov r10, 6
+    mov r10, 4
+    mov r8, 5
+    mov r9, 6
     o64 syscall
 
 	mov rax, 1
