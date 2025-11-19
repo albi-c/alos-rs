@@ -11,7 +11,7 @@ use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapRespons
 use crate::{debug, logger};
 use crate::lock::{InterruptLockGuard, Lock};
 use crate::memory::{address, alloc_page, alloc_page_zeroed, hhdm};
-use crate::memory::address::{PageCount, PhysAddrPageAligned};
+use crate::memory::address::{PageCount, PhysAddrPageAligned, VirtAddrPageAligned};
 use crate::memory::physical::allocator::MemoryAllocator;
 use crate::memory::physical::map::{MapEntry, MemoryMap};
 
@@ -136,7 +136,7 @@ impl EarlyAllocator {
     }
 }
 
-fn map_kernel(map: &mut MemoryMap, alloc: &EarlyAllocator, source_addr: usize, page_count: usize) {
+fn map_kernel(map: &mut MemoryMap, alloc: &EarlyAllocator, source_addr: VirtAddrPageAligned, page_count: usize) {
     let mut iterator = map.iterate(source_addr, || alloc.allocate_map());
 
     let curr_map = MemoryMap::get_current();
@@ -147,7 +147,7 @@ fn map_kernel(map: &mut MemoryMap, alloc: &EarlyAllocator, source_addr: usize, p
     }
 }
 
-fn map_hhdm(map: &mut MemoryMap, alloc: &EarlyAllocator, offset: usize, large_page_count: usize) {
+fn map_hhdm(map: &mut MemoryMap, alloc: &EarlyAllocator, offset: VirtAddrPageAligned, large_page_count: usize) {
     let mut iterator = map.iterate_3(offset, || alloc.allocate_map());
 
     for i in 0..large_page_count {
@@ -234,8 +234,9 @@ impl<A: MemoryAllocator> MemoryManager<A> {
 
         let map = early_alloc.allocate_map();
 
-        map_kernel(map, &early_alloc, exec_addr.virtual_base() as usize, kernel_pages);
-        map_hhdm(map, &early_alloc, hhdm::get_offset(), address::large_page_count_up(memory_end));
+        map_kernel(map, &early_alloc, VirtAddrPageAligned::new(exec_addr.virtual_base() as usize)
+            .expect("kernel virtual address is not page aligned"), kernel_pages);
+        map_hhdm(map, &early_alloc, VirtAddrPageAligned::hhdm_offset(), address::large_page_count_up(memory_end));
         
         for i in 256..512 {
             map.map_or_insert(i, || early_alloc.allocate_map());

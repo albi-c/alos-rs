@@ -10,6 +10,7 @@
 #![feature(thread_local)]
 #![feature(transmutability)]
 #![feature(push_mut)]
+#![feature(step_trait)]
 extern crate alloc;
 
 mod drivers;

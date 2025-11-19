@@ -1,10 +1,12 @@
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::memory::address;
 
 static OFFSET: AtomicUsize = AtomicUsize::new(0);
 
 #[inline(always)]
 pub unsafe fn set_offset(offset: usize) {
+    assert!(address::is_page_aligned(offset));
     OFFSET.store(offset, Ordering::Relaxed);
 }
 

@@ -1,5 +1,5 @@
-use core::marker::PhantomData;
-use core::ops::{Add, Mul, Shl, Shr};
+use core::iter::Step;
+use core::ops::{Add, Mul, Shl, Shr, Sub};
 use core::ptr::NonNull;
 use crate::memory::hhdm;
 
@@ -23,7 +23,11 @@ impl PageCount {
 
     #[inline(always)]
     pub fn as_phys_addr(self) -> PhysAddrPageAligned {
-        PhysAddrPageAligned(self.0 << PAGE_SHIFT)
+        PhysAddrPageAligned(self.size())
+    }
+    #[inline(always)]
+    pub fn as_virt_addr(self) -> VirtAddrPageAligned {
+        VirtAddrPageAligned(self.size())
     }
 
     #[inline(always)]
@@ -38,6 +42,20 @@ impl PageCount {
     #[inline(always)]
     pub fn pages_down(addr: usize) -> PageCount {
         PageCount(page_count_down(addr))
+    }
+}
+
+impl Step for PageCount {
+    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
+        (end.0 - start.0, Some(end.0 - start.0))
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        Some(Self(start.0.checked_add(count)?))
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        Some(Self(start.0.checked_sub(count)?))
     }
 }
 
@@ -127,7 +145,7 @@ impl PhysAddr {
         PageCount(page_count_down(self.0))
     }
 
-    pub fn hhdm_to_virt(self) -> VirtAddrW {
+    pub fn hhdm_to_virt(self) -> VirtAddr {
         VirtAddr::new(hhdm::add(self.0))
     }
 }
@@ -183,7 +201,7 @@ impl PhysAddrPageAligned {
         PageCount(self.0 >> PAGE_SHIFT)
     }
 
-    pub fn hhdm_to_virt(self) -> VirtAddrPageAligned<perms::PWrite> {
+    pub fn hhdm_to_virt(self) -> VirtAddrPageAligned {
         unsafe { VirtAddrPageAligned::new_unchecked(hhdm::add(self.0)) }
     }
 }
@@ -191,9 +209,16 @@ impl PhysAddrPageAligned {
 impl Add<PageCount> for PhysAddrPageAligned {
     type Output = PhysAddrPageAligned;
     fn add(self, rhs: PageCount) -> Self::Output {
-        Self(self.0 + (rhs.0 << PAGE_SHIFT))
+        Self(self.0 + rhs.size())
     }
 }
+impl Sub<PageCount> for PhysAddrPageAligned {
+    type Output = PhysAddrPageAligned;
+    fn sub(self, rhs: PageCount) -> Self::Output {
+        Self(self.0 - rhs.size())
+    }
+}
+
 impl From<PhysAddrPageAligned> for usize {
     fn from(value: PhysAddrPageAligned) -> Self {
         value.0
@@ -212,66 +237,51 @@ impl TryFrom<usize> for PhysAddrPageAligned {
     }
 }
 
-mod perms {
-    pub trait Base {}
-
-    pub trait Read : Base {}
-    pub trait Write : Read {}
-    pub trait Execute : Read {}
-
-    pub struct PNone {}
-    impl Base for PNone {}
-
-    pub struct PRead {}
-    impl Base for PRead {}
-    impl Read for PRead {}
-
-    pub struct PWrite {}
-    impl Base for PWrite {}
-    impl Read for PWrite {}
-    impl Write for PWrite {}
-
-    pub struct PExecute {}
-    impl Base for PExecute {}
-    impl Read for PExecute {}
-    impl Execute for PExecute {}
-
-    pub struct PWriteExecute {}
-    impl Base for PWriteExecute {}
-    impl Read for PWriteExecute {}
-    impl Write for PWriteExecute {}
-    impl Execute for PWriteExecute {}
-}
-
-pub type VirtAddrN = VirtAddr<perms::PNone>;
-pub type VirtAddrR = VirtAddr<perms::PRead>;
-pub type VirtAddrW = VirtAddr<perms::PWrite>;
-pub type VirtAddrX = VirtAddr<perms::PExecute>;
-pub type VirtAddrWX = VirtAddr<perms::PWriteExecute>;
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct VirtAddr<P: perms::Base>(pub usize, PhantomData<P>);
+pub struct VirtAddr(pub usize);
 
-impl<P: perms::Base> VirtAddr<P> {
+impl VirtAddr {
     pub fn new(addr: usize) -> Self {
-        Self(addr, PhantomData)
+        Self(addr)
+    }
+
+    #[inline(always)]
+    pub fn is_page_aligned(self) -> bool {
+        is_page_aligned(self.0)
+    }
+    #[inline(always)]
+    pub fn as_page_aligned(self) -> Option<VirtAddrPageAligned> {
+        VirtAddrPageAligned::new(self.0)
+    }
+    #[inline(always)]
+    pub fn page_align_up(self) -> VirtAddrPageAligned {
+        VirtAddrPageAligned(page_align_up(self.0))
+    }
+    #[inline(always)]
+    pub fn page_align_down(self) -> VirtAddrPageAligned {
+        VirtAddrPageAligned(page_align_down(self.0))
+    }
+    #[inline(always)]
+    pub fn page_count_up(self) -> PageCount {
+        PageCount(page_count_up(self.0))
+    }
+    #[inline(always)]
+    pub fn page_count_down(self) -> PageCount {
+        PageCount(page_count_down(self.0))
     }
 
     pub fn hhdm_to_phys(self) -> PhysAddr {
         PhysAddr(hhdm::sub(self.0))
     }
-}
 
-impl<P: perms::Read> VirtAddr<P> {
     pub fn as_ptr<T>(&self) -> *const T {
         self.0 as *const T
     }
     pub unsafe fn as_ref<T>(&self) -> &T {
         unsafe { &*self.as_ptr() }
     }
-}
-impl<P: perms::Write> VirtAddr<P> {
+
     pub fn as_mut_ptr<T>(&self) -> *mut T {
         self.0 as *mut T
     }
@@ -280,76 +290,122 @@ impl<P: perms::Write> VirtAddr<P> {
     }
 }
 
-impl<P: perms::Base, T> From<*const T> for VirtAddr<P> {
+impl From<VirtAddr> for usize {
+    fn from(value: VirtAddr) -> Self {
+        value.0
+    }
+}
+impl From<VirtAddrPageAligned> for VirtAddr {
+    fn from(value: VirtAddrPageAligned) -> Self {
+        Self(value.0)
+    }
+}
+
+impl<T: ?Sized> From<*const T> for VirtAddr {
     fn from(ptr: *const T) -> Self {
-        Self::new(ptr as usize)
+        Self::new(ptr.addr())
     }
 }
-impl<P: perms::Base, T> From<*mut T> for VirtAddr<P> {
+impl<T: ?Sized> From<*mut T> for VirtAddr {
     fn from(ptr: *mut T) -> Self {
-        Self::new(ptr as usize)
+        Self::new(ptr.addr())
     }
 }
-impl<P: perms::Base, T> From<NonNull<T>> for VirtAddr<P> {
+impl<T: ?Sized> From<&T> for VirtAddr {
+    fn from(value: &T) -> Self {
+        Self::new((value as *const T).addr())
+    }
+}
+impl<T: ?Sized> From<&mut T> for VirtAddr {
+    fn from(value: &mut T) -> Self {
+        Self::new((value as *mut T).addr())
+    }
+}
+impl<T: ?Sized> From<NonNull<T>> for VirtAddr {
     fn from(ptr: NonNull<T>) -> Self {
-        Self::new(ptr.as_ptr() as usize)
+        Self::new(ptr.as_ptr().addr())
     }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct VirtAddrPageAligned<P: perms::Base>(pub usize, PhantomData<P>);
+pub struct VirtAddrPageAligned(pub usize);
 
-impl<P: perms::Base> VirtAddrPageAligned<P> {
+impl VirtAddrPageAligned {
     pub fn new(addr: usize) -> Option<Self> {
         if is_page_aligned(addr) {
-            Some(Self(addr, PhantomData))
+            Some(Self(addr))
         } else {
             None
         }
     }
     pub unsafe fn new_unchecked(addr: usize) -> Self {
-        Self(addr, PhantomData)
+        Self(addr)
+    }
+
+    #[inline(always)]
+    pub fn page_count(self) -> PageCount {
+        PageCount(self.0 >> PAGE_SHIFT)
     }
 
     pub fn hhdm_to_phys(self) -> PhysAddr {
         PhysAddr(hhdm::sub(self.0))
     }
-}
 
-impl<P: perms::Read> VirtAddrPageAligned<P> {
     pub fn as_ptr<T>(&self) -> *const T {
         self.0 as *const T
     }
     pub unsafe fn as_ref<'a, T>(&self) -> &'a T {
         unsafe { &*self.as_ptr() }
     }
-}
-impl<P: perms::Write> VirtAddrPageAligned<P> {
+
     pub fn as_mut_ptr<T>(&self) -> *mut T {
         self.0 as *mut T
     }
     pub unsafe fn as_mut<'a, T>(&self) -> &'a mut T {
         unsafe { &mut *self.as_mut_ptr() }
     }
+
+    pub fn hhdm_offset() -> Self {
+        Self(hhdm::get_offset())
+    }
 }
 
-impl<P: perms::Base, T> TryFrom<*const T> for VirtAddrPageAligned<P> {
+impl Add<PageCount> for VirtAddrPageAligned {
+    type Output = VirtAddrPageAligned;
+    fn add(self, rhs: PageCount) -> Self::Output {
+        Self(self.0 + rhs.size())
+    }
+}
+impl Sub<PageCount> for VirtAddrPageAligned {
+    type Output = VirtAddrPageAligned;
+    fn sub(self, rhs: PageCount) -> Self::Output {
+        Self(self.0 - rhs.size())
+    }
+}
+
+impl From<VirtAddrPageAligned> for usize {
+    fn from(value: VirtAddrPageAligned) -> Self {
+        value.0
+    }
+}
+
+impl<T: ?Sized> TryFrom<*const T> for VirtAddrPageAligned {
     type Error = ();
     fn try_from(ptr: *const T) -> Result<Self, Self::Error> {
-        Self::new(ptr as usize).ok_or(())
+        Self::new(ptr.addr()).ok_or(())
     }
 }
-impl<P: perms::Base, T> TryFrom<*mut T> for VirtAddrPageAligned<P> {
+impl<T: ?Sized> TryFrom<*mut T> for VirtAddrPageAligned {
     type Error = ();
     fn try_from(ptr: *mut T) -> Result<Self, Self::Error> {
-        Self::new(ptr as usize).ok_or(())
+        Self::new(ptr.addr()).ok_or(())
     }
 }
-impl<P: perms::Base, T> TryFrom<NonNull<T>> for VirtAddrPageAligned<P> {
+impl<T: ?Sized> TryFrom<NonNull<T>> for VirtAddrPageAligned {
     type Error = ();
     fn try_from(ptr: NonNull<T>) -> Result<Self, Self::Error> {
-        Self::new(ptr.as_ptr() as usize).ok_or(())
+        Self::new(ptr.as_ptr().addr()).ok_or(())
     }
 }
 

@@ -16,6 +16,7 @@ use crate::core_local::core_info;
 use crate::gdt::tss_set_kernel_stack;
 use crate::lock::{InterruptLockGuard, Lock};
 use crate::memory::{address, MemoryFlags, MemorySpace};
+use crate::memory::address::PageCount;
 
 const KERNEL_STACK_SIZE: usize = 1 << 16;
 
@@ -302,7 +303,7 @@ fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<
     const { assert!(size_of::<Box<T>>() == size_of::<usize>()) };
 
     let stack = MemorySpace::with(|mem| {
-        let pages = address::page_count_up(size);
+        let pages = PageCount::pages_up(size);
         let phys_addr = mem.phys_alloc(pages).expect("out of physical memory");
         let virt_addr = mem.virt_alloc(pages);
         mem.map_flag_func(phys_addr, virt_addr, pages, |i| if i == 0 {
@@ -310,7 +311,7 @@ fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<
         } else {
             MemoryFlags::DEFAULT_RW
         });
-        unsafe { core::slice::from_raw_parts_mut(virt_addr as *mut usize, size / size_of::<usize>()) }
+        unsafe { core::slice::from_raw_parts_mut(virt_addr.as_mut_ptr::<usize>(), size / size_of::<usize>()) }
     });
 
     let base = NonNull::new(stack.as_mut_ptr()).unwrap();
@@ -332,7 +333,7 @@ fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<
 fn allocate_user_stack(mem: &MemorySpace, size: usize) -> (NonNull<u8>, NonNull<u8>) {
     let size = address::page_align_up(size);
     let base = {
-        let pages = address::page_count_up(size);
+        let pages = PageCount::pages_up(size);
         let phys_addr = mem.user_phys_alloc(pages).expect("out of physical memory");
         let virt_addr = mem.user_virt_alloc(pages).expect("no user virtual memory space");
         mem.map_flag_func(phys_addr, virt_addr, pages, |i| if i == 0 {
@@ -340,7 +341,7 @@ fn allocate_user_stack(mem: &MemorySpace, size: usize) -> (NonNull<u8>, NonNull<
         } else {
             MemoryFlags::DEFAULT_RW | MemoryFlags::USER
         });
-        NonNull::new(virt_addr as *mut u8).unwrap()
+        NonNull::new(virt_addr.as_mut_ptr::<u8>()).unwrap()
     };
 
     let top = unsafe { base.byte_add(size) };

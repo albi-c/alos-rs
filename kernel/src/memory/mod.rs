@@ -11,7 +11,7 @@ use core::ops::BitOr;
 use limine::request::{ExecutableAddressRequest, HhdmRequest, MemoryMapRequest};
 use crate::core_local;
 use crate::lock::Lock;
-use crate::memory::address::{PageCount, PhysAddrPageAligned};
+use crate::memory::address::{PageCount, PhysAddrPageAligned, VirtAddr, VirtAddrPageAligned};
 use crate::memory::physical::buddy_allocator::BuddyAllocator;
 use crate::memory::physical::{MemoryManager, PhysicalMemorySpace};
 use crate::memory::physical::map::MapEntry;
@@ -75,7 +75,7 @@ impl MemorySpace {
         })
     }
     pub fn new_new_user(&self) -> Arc<Self> {
-        self.new(Some(VirtualMemorySpace::new(0x1000, 0x800000000000 - 0x1000)))
+        self.new(Some(VirtualMemorySpace::new(VirtAddr::new(0x1000), 0x800000000000 - 0x1000)))
     }
     pub fn new(&self, virt_user: Option<VirtualMemorySpace>) -> Arc<Self> {
         Arc::new(Self {
@@ -124,24 +124,21 @@ impl MemorySpace {
         self.phys_dealloc(addr, count);
     }
 
-    pub fn virt_alloc(&self, count: usize) -> usize {
-        self.virt_kernel.write().allocate(count * address::PAGE_SIZE).expect("out of virtual memory")
+    pub fn virt_alloc(&self, count: PageCount) -> VirtAddrPageAligned {
+        self.virt_kernel.write().allocate(count).expect("out of virtual memory")
     }
-    pub fn virt_dealloc(&self, addr: usize, count: usize) {
-        self.virt_kernel.write().deallocate(addr, count * address::PAGE_SIZE)
+    pub fn virt_dealloc(&self, addr: VirtAddrPageAligned, count: PageCount) {
+        self.virt_kernel.write().deallocate(addr, count)
     }
 
-    pub fn user_virt_alloc(&self, count: usize) -> Option<usize> {
-        self.virt_user.as_ref().expect("no user memory space").write()
-            .allocate(count * address::PAGE_SIZE)
+    pub fn user_virt_alloc(&self, count: PageCount) -> Option<VirtAddrPageAligned> {
+        self.virt_user.as_ref().expect("no user memory space").write().allocate(count)
     }
-    pub fn user_virt_alloc_at(&self, addr: usize, count: usize) -> Option<()> {
-        self.virt_user.as_ref().expect("no user memory space").write()
-            .allocate_at(addr, count * address::PAGE_SIZE)
+    pub fn user_virt_alloc_at(&self, addr: VirtAddrPageAligned, count: PageCount) -> Option<()> {
+        self.virt_user.as_ref().expect("no user memory space").write().allocate_at(addr, count)
     }
-    pub fn user_virt_dealloc(&self, addr: usize, count: usize) -> Option<()> {
-        Some(self.virt_user.as_ref().expect("no user memory space").write()
-            .deallocate(addr, count * address::PAGE_SIZE))
+    pub fn user_virt_dealloc(&self, addr: VirtAddrPageAligned, count: PageCount) {
+        self.virt_user.as_ref().expect("no user memory space").write().deallocate(addr, count)
     }
 
     #[inline(always)]
@@ -172,20 +169,19 @@ impl MemorySpace {
         // IPI when unmapping or changing permissions
     }
 
-    pub fn map(&self, phys: usize, virt: usize, count: usize, flags: MemoryFlags) {
+    pub fn map(&self, phys: PhysAddrPageAligned, virt: VirtAddrPageAligned,
+               count: PageCount, flags: MemoryFlags) {
         self.map_flag_func(phys, virt, count, |_| flags);
     }
-    pub fn map_flag_func(&self, phys: usize, virt: usize, count: usize,
-                         mut flags: impl FnMut(usize) -> MemoryFlags) {
-        assert!(address::is_page_aligned(phys));
-        assert!(address::is_page_aligned(virt));
+    pub fn map_flag_func(&self, phys: PhysAddrPageAligned, virt: VirtAddrPageAligned,
+                         count: PageCount, mut flags: impl FnMut(usize) -> MemoryFlags) {
         assert!(count > 0);
         let mut map_lock = self.phys.map();
         let mut it = map_lock.iterate(
             virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap().into()) });
-        for i in 0..count {
+        for i in 0.into()..count {
             let me = it.next();
-            *me = MapEntry::new_with_flags(phys + i * address::PAGE_SIZE, flags(i).0).present();
+            *me = MapEntry::new_with_flags(usize::from(phys + i), flags(usize::from(i)).0).present();
         }
     }
     pub fn unmap(&mut self, virt: usize, count: usize) {
@@ -206,7 +202,7 @@ pub fn init() -> InitValues {
 
     let phys = PMM.write().init(memory_map_response, hhdm_response, exec_addr);
     let virt_kernel = VirtualMemorySpace::new(
-        0xffff_f000_0000_0000, 0xfff_8000_0000);
+        VirtAddr::new(0xffff_f000_0000_0000), 0xfff_8000_0000);
 
     InitValues(phys, virt_kernel)
 }

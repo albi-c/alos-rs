@@ -1,6 +1,7 @@
 use core::arch::asm;
 use crate::memory::hhdm;
 use crate::{print, println};
+use crate::memory::address::VirtAddrPageAligned;
 
 #[derive(Debug, Copy, Clone)]
 pub struct MapEntry(pub u64);
@@ -247,9 +248,9 @@ impl MemoryMap {
         }
     }
 
-    pub fn iterate<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: usize,
+    pub fn iterate<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: VirtAddrPageAligned,
                                                          mut alloc: A) -> MemoryMapIterator<'_, 4, A> {
-        let indices = Self::get_indices(addr);
+        let indices = Self::get_indices(usize::from(addr));
 
         let m1 = self.map_or_insert(indices[0], || alloc());
         let m2 = m1.map_or_insert(indices[1], || alloc());
@@ -263,9 +264,9 @@ impl MemoryMap {
         }
     }
 
-    pub fn iterate_3<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: usize,
+    pub fn iterate_3<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: VirtAddrPageAligned,
                                                             mut alloc: A) -> MemoryMapIterator<'_, 3, A> {
-        let [indices @ .., _] = Self::get_indices(addr);
+        let [indices @ .., _] = Self::get_indices(usize::from(addr));
 
         let m1 = self.map_or_insert(indices[0], || alloc());
         let m2 = m1.map_or_insert(indices[1], || alloc());

@@ -1,42 +1,42 @@
 use alloc::collections::BTreeMap;
 use core::ops::Bound;
-use crate::memory::address;
+use crate::memory::address::{PageCount, VirtAddr, VirtAddrPageAligned};
 
 #[derive(Debug, Copy, Clone)]
 struct MemoryAllocation {
     allocated: bool,
-    length: usize,
+    length: VirtAddrPageAligned,
 }
 
 impl MemoryAllocation {
-    pub const fn free(length: usize) -> Self {
+    pub const fn free(length: VirtAddrPageAligned) -> Self {
         Self { allocated: false, length }
     }
-    pub const fn allocated(length: usize) -> Self {
+    pub const fn allocated(length: VirtAddrPageAligned) -> Self {
         Self { allocated: true, length }
     }
 }
 
 #[derive(Debug)]
 pub struct VirtualMemorySpace {
-    data: BTreeMap<usize, MemoryAllocation>,
+    data: BTreeMap<VirtAddrPageAligned, MemoryAllocation>,
 }
 
 impl VirtualMemorySpace {
-    pub fn new(start: usize, length: usize) -> Self {
+    pub fn new(start: VirtAddr, length: usize) -> Self {
         VirtualMemorySpace {
             data: BTreeMap::from([(
-                address::page_align_up(start),
-                MemoryAllocation::free(address::page_align_down(length)),
+                start.page_align_up(),
+                MemoryAllocation::free(VirtAddr::new(length).page_align_down()),
             )]),
         }
     }
 
-    pub fn allocate(&mut self, size: usize) -> Option<usize> {
-        assert!(address::is_page_aligned(size));
+    pub fn allocate(&mut self, size: PageCount) -> Option<VirtAddrPageAligned> {
+        let size = size.as_virt_addr();
         let (base, rem) = self.data.iter_mut().filter_map(
             |(&base, entry)| if !entry.allocated && entry.length >= size {
-                let rem = entry.length - size;
+                let rem = entry.length - size.page_count();
                 entry.allocated = true;
                 entry.length = size;
                 Some((base, rem))
@@ -44,37 +44,37 @@ impl VirtualMemorySpace {
                 None
             }
         ).next()?;
-        if rem == 0 {}
-        self.data.insert(base + size, MemoryAllocation::free(rem));
+        if usize::from(rem) != 0 {
+            self.data.insert(base + size.page_count(), MemoryAllocation::free(rem));
+        }
         Some(base)
     }
 
-    pub fn allocate_at(&mut self, addr: usize, size: usize) -> Option<()> {
-        assert!(address::is_page_aligned(addr));
-        assert!(address::is_page_aligned(size));
+    pub fn allocate_at(&mut self, addr: VirtAddrPageAligned, size: PageCount) -> Option<()> {
+        let size = size.as_virt_addr();
         let mut cur = self.data.upper_bound_mut(Bound::Included(&addr));
         let (&base, entry) = cur.prev()?;
-        let diff = addr - base;
-        if diff == 0 {
+        let diff = addr - base.page_count();
+        if usize::from(diff) == 0 {
             if entry.length >= size {
-                let rem = entry.length - size;
+                let rem = entry.length - size.page_count();
                 entry.length = size;
                 entry.allocated = true;
-                if rem > 0 {
-                    self.data.insert(base + size, MemoryAllocation::free(rem));
+                if usize::from(rem) > 0 {
+                    self.data.insert(base + size.page_count(), MemoryAllocation::free(rem));
                 }
                 Some(())
             } else {
                 None
             }
         } else {
-            if entry.length - diff >= size {
-                let rest = entry.length - diff;
+            if entry.length - diff.page_count() >= size {
+                let rest = entry.length - diff.page_count();
                 entry.length = diff;
-                let rem = rest - size;
+                let rem = rest - size.page_count();
                 self.data.insert(addr, MemoryAllocation::allocated(size));
-                if rem > 0 {
-                    self.data.insert(addr + size, MemoryAllocation::free(rem));
+                if usize::from(rem) > 0 {
+                    self.data.insert(addr + size.page_count(), MemoryAllocation::free(rem));
                 }
                 Some(())
             } else {
@@ -83,10 +83,8 @@ impl VirtualMemorySpace {
         }
     }
     
-    pub fn deallocate(&mut self, base: usize, size: usize) {
+    pub fn deallocate(&mut self, base: VirtAddrPageAligned, size: PageCount) {
         // TODO: callback for physical memory deallocation
-        assert!(address::is_page_aligned(base));
-        assert!(address::is_page_aligned(size));
         let end = base + size;
         let mut cur = self.data.lower_bound_mut(Bound::Included(&base));
         while let Some((&base, entry)) = cur.next() {
