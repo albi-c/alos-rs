@@ -11,16 +11,169 @@ pub const LARGE_PAGE_SHIFT: u8 = 21;
 pub const LARGE_PAGE_SIZE: usize = 1 << LARGE_PAGE_SHIFT;
 pub const LARGE_PAGE_MASK: usize = LARGE_PAGE_SIZE - 1;
 
+macro_rules! simple_op {
+    ($id:ident, $op:ident, $func:ident) => {
+        impl $op<usize> for $id {
+            type Output = $id;
+            fn $func(self, rhs: usize) -> Self::Output {
+                $id(self.0.$func(rhs))
+            }
+        }
+    };
+}
+
+macro_rules! addr_add_sub_page_count {
+    ($addr:ident) => {
+        impl Add<PageCount> for $addr {
+            type Output = $addr;
+            fn add(self, rhs: PageCount) -> Self::Output {
+                Self(self.0 + rhs.size())
+            }
+        }
+        impl Sub<PageCount> for $addr {
+            type Output = $addr;
+            fn sub(self, rhs: PageCount) -> Self::Output {
+                Self(self.0 - rhs.size())
+            }
+        }
+    };
+}
+macro_rules! addr_add_sub_usize {
+    ($addr:ident) => {
+        impl Add<usize> for $addr {
+            type Output = $addr;
+            fn add(self, rhs: usize) -> Self::Output {
+                Self(self.0 + rhs)
+            }
+        }
+        impl Sub<usize> for $addr {
+            type Output = $addr;
+            fn sub(self, rhs: usize) -> Self::Output {
+                Self(self.0 - rhs)
+            }
+        }
+    };
+}
+
+macro_rules! addr_alignment {
+    ($addr:ident, $aligned_addr:ident) => {
+        impl $addr {
+            #[inline(always)]
+            pub fn is_page_aligned(self) -> bool {
+                is_page_aligned(self.0)
+            }
+            #[inline(always)]
+            pub fn as_page_aligned(self) -> Option<$aligned_addr> {
+                $aligned_addr::new(self.0)
+            }
+            #[inline(always)]
+            pub fn page_align_up(self) -> $aligned_addr {
+                $aligned_addr(page_align_up(self.0))
+            }
+            #[inline(always)]
+            pub fn page_align_down(self) -> $aligned_addr {
+                $aligned_addr(page_align_down(self.0))
+            }
+            #[inline(always)]
+            pub fn page_count_up(self) -> PageCount {
+                PageCount(page_count_up(self.0))
+            }
+            #[inline(always)]
+            pub fn page_count_down(self) -> PageCount {
+                PageCount(page_count_down(self.0))
+            }
+        }
+        impl $aligned_addr {
+            #[inline(always)]
+            pub fn new(addr: usize) -> Option<Self> {
+                if is_page_aligned(addr) {
+                    Some(Self(addr))
+                } else {
+                    None
+                }
+            }
+            #[inline(always)]
+            pub unsafe fn new_unchecked(addr: usize) -> Self {
+                Self(addr)
+            }
+        }
+        impl From<$aligned_addr> for $addr {
+            fn from(value: $aligned_addr) -> Self {
+                Self(value.0)
+            }
+        }
+        impl TryFrom<$addr> for $aligned_addr {
+            type Error = ();
+            fn try_from(value: $addr) -> Result<Self, Self::Error> {
+                value.as_page_aligned().ok_or(())
+            }
+        }
+        impl From<$aligned_addr> for usize {
+            fn from(value: $aligned_addr) -> Self {
+                value.0
+            }
+        }
+        impl TryFrom<usize> for $aligned_addr {
+            type Error = ();
+            fn try_from(value: usize) -> Result<Self, Self::Error> {
+                Self::new(value).ok_or(())
+            }
+        }
+    };
+}
+
+macro_rules! addr_to_from_usize {
+    ($addr:ident) => {
+        impl $addr {
+            #[inline(always)]
+            pub fn new(addr: usize) -> Self {
+                Self(addr)
+            }
+        }
+        impl From<$addr> for usize {
+            fn from(value: $addr) -> Self {
+                value.0
+            }
+        }
+        impl From<usize> for $addr {
+            fn from(value: usize) -> Self {
+                $addr(value)
+            }
+        }
+    };
+}
+
+macro_rules! addr_cmp {
+    ($addr:ident) => {
+        impl PartialEq<usize> for $addr {
+            fn eq(&self, other: &usize) -> bool {
+                self.0 == *other
+            }
+        }
+        impl PartialOrd<usize> for $addr {
+            fn partial_cmp(&self, other: &usize) -> Option<core::cmp::Ordering> {
+                self.0.partial_cmp(other)
+            }
+        }
+        impl PartialEq<$addr> for usize {
+            fn eq(&self, other: &$addr) -> bool {
+                *self == other.0
+            }
+        }
+        impl PartialOrd<$addr> for usize {
+            fn partial_cmp(&self, other: &$addr) -> Option<core::cmp::Ordering> {
+                self.partial_cmp(&other.0)
+            }
+        }
+    };
+}
+
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct PageCount(pub usize);
+pub struct PageCount(usize);
 
 impl PageCount {
-    #[inline(always)]
-    pub fn new(count: usize) -> Self {
-        PageCount(count)
-    }
-
     #[inline(always)]
     pub fn as_phys_addr(self) -> PhysAddrPageAligned {
         PhysAddrPageAligned(self.size())
@@ -65,137 +218,41 @@ impl Add<PageCount> for PageCount {
         PageCount(self.0 + rhs.0)
     }
 }
-impl Add<usize> for PageCount {
+impl Sub<PageCount> for PageCount {
     type Output = PageCount;
-    fn add(self, rhs: usize) -> Self::Output {
-        PageCount(self.0 + rhs)
+    fn sub(self, rhs: PageCount) -> Self::Output {
+        PageCount(self.0 - rhs.0)
     }
 }
-impl Mul<usize> for PageCount {
-    type Output = PageCount;
-    fn mul(self, rhs: usize) -> Self::Output {
-        PageCount(self.0 * rhs)
-    }
-}
-impl Shl<usize> for PageCount {
-    type Output = PageCount;
-    fn shl(self, rhs: usize) -> Self::Output {
-        PageCount(self.0 << rhs)
-    }
-}
-impl Shr<usize> for PageCount {
-    type Output = PageCount;
-    fn shr(self, rhs: usize) -> Self::Output {
-        PageCount(self.0 >> rhs)
-    }
-}
-impl From<usize> for PageCount {
-    fn from(count: usize) -> Self {
-        Self(count)
-    }
-}
-impl From<PageCount> for usize {
-    fn from(count: PageCount) -> Self {
-        count.0
-    }
-}
-impl PartialEq<usize> for PageCount {
-    fn eq(&self, other: &usize) -> bool {
-        self.0 == *other
-    }
-}
-impl PartialOrd<usize> for PageCount {
-    fn partial_cmp(&self, other: &usize) -> Option<core::cmp::Ordering> {
-        self.0.partial_cmp(other)
-    }
-}
+simple_op!(PageCount, Add, add);
+simple_op!(PageCount, Sub, sub);
+simple_op!(PageCount, Mul, mul);
+simple_op!(PageCount, Shl, shl);
+simple_op!(PageCount, Shr, shr);
+addr_to_from_usize!(PageCount);
+addr_cmp!(PageCount);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct PhysAddr(pub usize);
+pub struct PhysAddr(usize);
 
 impl PhysAddr {
-    #[inline(always)]
-    pub fn new(addr: usize) -> Self {
-        PhysAddr(addr)
-    }
-
-    #[inline(always)]
-    pub fn is_page_aligned(self) -> bool {
-        is_page_aligned(self.0)
-    }
-    #[inline(always)]
-    pub fn as_page_aligned(self) -> Option<PhysAddrPageAligned> {
-        PhysAddrPageAligned::new(self.0)
-    }
-    #[inline(always)]
-    pub fn page_align_up(self) -> PhysAddrPageAligned {
-        PhysAddrPageAligned(page_align_up(self.0))
-    }
-    #[inline(always)]
-    pub fn page_align_down(self) -> PhysAddrPageAligned {
-        PhysAddrPageAligned(page_align_down(self.0))
-    }
-    #[inline(always)]
-    pub fn page_count_up(self) -> PageCount {
-        PageCount(page_count_up(self.0))
-    }
-    #[inline(always)]
-    pub fn page_count_down(self) -> PageCount {
-        PageCount(page_count_down(self.0))
-    }
-
     pub fn hhdm_to_virt(self) -> VirtAddr {
         VirtAddr::new(hhdm::add(self.0))
     }
 }
 
-impl Add<usize> for PhysAddr {
-    type Output = PhysAddr;
-    fn add(self, rhs: usize) -> Self::Output {
-        Self(self.0 + rhs)
-    }
-}
-impl Add<PageCount> for PhysAddr {
-    type Output = PhysAddr;
-    fn add(self, rhs: PageCount) -> Self::Output {
-        Self(self.0 + (rhs.0 << PAGE_SHIFT))
-    }
-}
-impl From<usize> for PhysAddr {
-    fn from(value: usize) -> Self {
-        Self(value)
-    }
-}
-impl From<PhysAddr> for usize {
-    fn from(value: PhysAddr) -> Self {
-        value.0
-    }
-}
-impl From<PhysAddrPageAligned> for PhysAddr {
-    fn from(value: PhysAddrPageAligned) -> Self {
-        Self(value.0)
-    }
-}
+addr_add_sub_page_count!(PhysAddr);
+addr_add_sub_usize!(PhysAddr);
+addr_alignment!(PhysAddr, PhysAddrPageAligned);
+addr_to_from_usize!(PhysAddr);
+addr_cmp!(PhysAddr);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct PhysAddrPageAligned(usize);
 
 impl PhysAddrPageAligned {
-    #[inline(always)]
-    pub fn new(addr: usize) -> Option<Self> {
-        if is_page_aligned(addr) {
-            Some(Self(addr))
-        } else {
-            None
-        }
-    }
-    #[inline(always)]
-    pub unsafe fn new_unchecked(addr: usize) -> Self {
-        Self(addr)
-    }
-
     #[inline(always)]
     pub fn page_count(self) -> PageCount {
         PageCount(self.0 >> PAGE_SHIFT)
@@ -206,71 +263,14 @@ impl PhysAddrPageAligned {
     }
 }
 
-impl Add<PageCount> for PhysAddrPageAligned {
-    type Output = PhysAddrPageAligned;
-    fn add(self, rhs: PageCount) -> Self::Output {
-        Self(self.0 + rhs.size())
-    }
-}
-impl Sub<PageCount> for PhysAddrPageAligned {
-    type Output = PhysAddrPageAligned;
-    fn sub(self, rhs: PageCount) -> Self::Output {
-        Self(self.0 - rhs.size())
-    }
-}
-
-impl From<PhysAddrPageAligned> for usize {
-    fn from(value: PhysAddrPageAligned) -> Self {
-        value.0
-    }
-}
-impl TryFrom<PhysAddr> for PhysAddrPageAligned {
-    type Error = ();
-    fn try_from(value: PhysAddr) -> Result<Self, Self::Error> {
-        value.as_page_aligned().ok_or(())
-    }
-}
-impl TryFrom<usize> for PhysAddrPageAligned {
-    type Error = ();
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        Self::new(value).ok_or(())
-    }
-}
+addr_add_sub_page_count!(PhysAddrPageAligned);
+addr_cmp!(PhysAddrPageAligned);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct VirtAddr(pub usize);
+pub struct VirtAddr(usize);
 
 impl VirtAddr {
-    pub fn new(addr: usize) -> Self {
-        Self(addr)
-    }
-
-    #[inline(always)]
-    pub fn is_page_aligned(self) -> bool {
-        is_page_aligned(self.0)
-    }
-    #[inline(always)]
-    pub fn as_page_aligned(self) -> Option<VirtAddrPageAligned> {
-        VirtAddrPageAligned::new(self.0)
-    }
-    #[inline(always)]
-    pub fn page_align_up(self) -> VirtAddrPageAligned {
-        VirtAddrPageAligned(page_align_up(self.0))
-    }
-    #[inline(always)]
-    pub fn page_align_down(self) -> VirtAddrPageAligned {
-        VirtAddrPageAligned(page_align_down(self.0))
-    }
-    #[inline(always)]
-    pub fn page_count_up(self) -> PageCount {
-        PageCount(page_count_up(self.0))
-    }
-    #[inline(always)]
-    pub fn page_count_down(self) -> PageCount {
-        PageCount(page_count_down(self.0))
-    }
-
     pub fn hhdm_to_phys(self) -> PhysAddr {
         PhysAddr(hhdm::sub(self.0))
     }
@@ -290,16 +290,11 @@ impl VirtAddr {
     }
 }
 
-impl From<VirtAddr> for usize {
-    fn from(value: VirtAddr) -> Self {
-        value.0
-    }
-}
-impl From<VirtAddrPageAligned> for VirtAddr {
-    fn from(value: VirtAddrPageAligned) -> Self {
-        Self(value.0)
-    }
-}
+addr_add_sub_page_count!(VirtAddr);
+addr_add_sub_usize!(VirtAddr);
+addr_alignment!(VirtAddr, VirtAddrPageAligned);
+addr_to_from_usize!(VirtAddr);
+addr_cmp!(VirtAddr);
 
 impl<T: ?Sized> From<*const T> for VirtAddr {
     fn from(ptr: *const T) -> Self {
@@ -329,20 +324,9 @@ impl<T: ?Sized> From<NonNull<T>> for VirtAddr {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct VirtAddrPageAligned(pub usize);
+pub struct VirtAddrPageAligned(usize);
 
 impl VirtAddrPageAligned {
-    pub fn new(addr: usize) -> Option<Self> {
-        if is_page_aligned(addr) {
-            Some(Self(addr))
-        } else {
-            None
-        }
-    }
-    pub unsafe fn new_unchecked(addr: usize) -> Self {
-        Self(addr)
-    }
-
     #[inline(always)]
     pub fn page_count(self) -> PageCount {
         PageCount(self.0 >> PAGE_SHIFT)
@@ -371,24 +355,8 @@ impl VirtAddrPageAligned {
     }
 }
 
-impl Add<PageCount> for VirtAddrPageAligned {
-    type Output = VirtAddrPageAligned;
-    fn add(self, rhs: PageCount) -> Self::Output {
-        Self(self.0 + rhs.size())
-    }
-}
-impl Sub<PageCount> for VirtAddrPageAligned {
-    type Output = VirtAddrPageAligned;
-    fn sub(self, rhs: PageCount) -> Self::Output {
-        Self(self.0 - rhs.size())
-    }
-}
-
-impl From<VirtAddrPageAligned> for usize {
-    fn from(value: VirtAddrPageAligned) -> Self {
-        value.0
-    }
-}
+addr_add_sub_page_count!(VirtAddrPageAligned);
+addr_cmp!(VirtAddrPageAligned);
 
 impl<T: ?Sized> TryFrom<*const T> for VirtAddrPageAligned {
     type Error = ();
