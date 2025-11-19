@@ -168,6 +168,16 @@ macro_rules! addr_cmp {
     };
 }
 
+macro_rules! addr_page_count_diff {
+    ($addr:ident) => {
+        impl Sub<$addr> for $addr {
+            type Output = PageCount;
+            fn sub(self, rhs: $addr) -> Self::Output {
+                PageCount(self.0 - rhs.0)
+            }
+        }
+    };
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -265,6 +275,7 @@ impl PhysAddrPageAligned {
 
 addr_add_sub_page_count!(PhysAddrPageAligned);
 addr_cmp!(PhysAddrPageAligned);
+addr_page_count_diff!(PhysAddrPageAligned);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -357,6 +368,7 @@ impl VirtAddrPageAligned {
 
 addr_add_sub_page_count!(VirtAddrPageAligned);
 addr_cmp!(VirtAddrPageAligned);
+addr_page_count_diff!(VirtAddrPageAligned);
 
 impl<T: ?Sized> TryFrom<*const T> for VirtAddrPageAligned {
     type Error = ();

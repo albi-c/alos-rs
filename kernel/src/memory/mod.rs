@@ -75,7 +75,7 @@ impl MemorySpace {
         })
     }
     pub fn new_new_user(&self) -> Arc<Self> {
-        self.new(Some(VirtualMemorySpace::new(VirtAddr::new(0x1000), 0x800000000000 - 0x1000)))
+        self.new(Some(VirtualMemorySpace::new(VirtAddr::new(0x1000), PageCount::pages_down(0x800000000000) - 1)))
     }
     pub fn new(&self, virt_user: Option<VirtualMemorySpace>) -> Arc<Self> {
         Arc::new(Self {
@@ -202,7 +202,7 @@ pub fn init() -> InitValues {
 
     let phys = PMM.write().init(memory_map_response, hhdm_response, exec_addr);
     let virt_kernel = VirtualMemorySpace::new(
-        VirtAddr::new(0xffff_f000_0000_0000), 0xfff_8000_0000);
+        VirtAddr::new(0xffff_f000_0000_0000), PageCount::pages_down(0xfff_8000_0000));
 
     InitValues(phys, virt_kernel)
 }
