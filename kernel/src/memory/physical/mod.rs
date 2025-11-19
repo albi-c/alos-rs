@@ -11,6 +11,7 @@ use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapRespons
 use crate::{debug, logger};
 use crate::lock::{InterruptLockGuard, Lock};
 use crate::memory::{address, alloc_page, alloc_page_zeroed, hhdm};
+use crate::memory::address::{PageCount, PhysAddrPageAligned};
 use crate::memory::physical::allocator::MemoryAllocator;
 use crate::memory::physical::map::{MapEntry, MemoryMap};
 
@@ -44,7 +45,7 @@ pub struct PhysicalMemorySpace {
 impl PhysicalMemorySpace {
     fn new_range(&self, range: Range<usize>) -> Self {
         let mut s_map = self.map();
-        let map: &mut MemoryMap = unsafe { hhdm::as_mut_ref(alloc_page_zeroed().unwrap()) };
+        let map: &mut MemoryMap = unsafe { alloc_page_zeroed().unwrap().hhdm_to_virt().as_mut() };
         for i in range {
             let flags = if i < 256 {
                 MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE | MapEntry::FLAG_USER
@@ -52,7 +53,7 @@ impl PhysicalMemorySpace {
                 MapEntry::FLAG_PRESENT | MapEntry::FLAG_WRITE
             };
             *map.at(i) = MapEntry::from_map_with_flags(s_map.map_or_insert(
-                i, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) }), flags);
+                i, || unsafe { alloc_page().unwrap().hhdm_to_virt().as_mut() }), flags);
         }
         PhysicalMemorySpace { map: map.into() }
     }
@@ -275,7 +276,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         [&mut self.alloc_main, &mut self.alloc_32]
     }
 
-    pub fn alloc_page(&mut self) -> Option<usize> {
+    pub fn alloc_page(&mut self) -> Option<PhysAddrPageAligned> {
         for alloc in self.allocators() {
             if let Some(page) = alloc.alloc_page() {
                 return Some(page);
@@ -283,7 +284,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         }
         None
     }
-    pub fn dealloc_page(&mut self, addr: usize) {
+    pub fn dealloc_page(&mut self, addr: PhysAddrPageAligned) {
         for alloc in self.allocators() {
             if alloc.dealloc_page(addr) {
                 return;
@@ -292,7 +293,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         panic!("Attempted to deallocate non-existent memory");
     }
 
-    pub fn alloc_pages(&mut self, count: usize) -> Option<usize> {
+    pub fn alloc_pages(&mut self, count: PageCount) -> Option<PhysAddrPageAligned> {
         for alloc in self.allocators() {
             if let Some(page) = alloc.alloc_pages(count) {
                 return Some(page);
@@ -300,7 +301,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         }
         None
     }
-    pub fn dealloc_pages(&mut self, addr: usize, count: usize) {
+    pub fn dealloc_pages(&mut self, addr: PhysAddrPageAligned, count: PageCount) {
         for alloc in self.allocators() {
             if alloc.dealloc_pages(addr, count) {
                 return;

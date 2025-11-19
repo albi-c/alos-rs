@@ -26,8 +26,8 @@ pub fn init() {
     }
     if INITIALIZED.swap(true, Ordering::Relaxed) {
         let addr = memory::alloc_page().expect("failed to allocate memory for time info");
-        msr_write(MSR, addr as u64);
-        TIME_INFO.store(memory::hhdm::as_ptr(addr), Ordering::Relaxed);
+        msr_write(MSR, usize::from(addr) as u64);
+        TIME_INFO.store(addr.hhdm_to_virt().as_mut_ptr(), Ordering::Relaxed);
     }
 }
 

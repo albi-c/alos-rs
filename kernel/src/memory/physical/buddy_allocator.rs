@@ -1,7 +1,7 @@
 use core::cmp::{max, min};
 use core::mem::MaybeUninit;
 use crate::memory::address;
-use crate::memory::address::PAGE_SHIFT;
+use crate::memory::address::{PageCount, PhysAddrPageAligned, PAGE_SHIFT};
 use crate::memory::physical::allocator::MemoryAllocator;
 
 type PageData = u64;
@@ -128,7 +128,7 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         self.alloc_rec_set(0, end_offset);
     }
 
-    fn alloc_page(&mut self) -> Option<usize> {
+    fn alloc_page(&mut self) -> Option<PhysAddrPageAligned> {
         if !self.enabled {
             return None;
         }
@@ -138,19 +138,20 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         if !self.alloc_get_set(0, self.first_free) {
             let addr = self.first_free << PAGE_SHIFT;
             self.first_free += 1;
-            Some(addr)
+            Some(PhysAddrPageAligned::new(addr).expect("alloc_page: unaligned address"))
         } else {
             for i in self.first_free..=self.last_free {
                 if !self.alloc_get_set(0, i) {
                     let addr = i << PAGE_SHIFT;
                     self.first_free = i + 1;
-                    return Some(addr);
+                    return Some(PhysAddrPageAligned::new(addr).expect("alloc_page: unaligned address"));
                 }
             }
             None
         }
     }
-    fn dealloc_page(&mut self, addr: usize) -> bool {
+    fn dealloc_page(&mut self, addr: PhysAddrPageAligned) -> bool {
+        let addr = usize::from(addr);
         if !self.enabled || addr < (self.start_page << PAGE_SHIFT) || addr > (self.end_page << PAGE_SHIFT) {
             return false;
         }
@@ -162,7 +163,8 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         true
     }
 
-    fn alloc_pages(&mut self, count: usize) -> Option<usize> {
+    fn alloc_pages(&mut self, count: PageCount) -> Option<PhysAddrPageAligned> {
+        let count = usize::from(count);
         if !self.enabled {
             return None;
         }
@@ -178,11 +180,13 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
             if i == self.first_free {
                 self.first_free = i + 1;
             }
-            return Some(addr);
+            return Some(PhysAddrPageAligned::new(addr).expect("alloc_pages: unaligned address"));
         }
         None
     }
-    fn dealloc_pages(&mut self, addr: usize, count: usize) -> bool {
+    fn dealloc_pages(&mut self, addr: PhysAddrPageAligned, count: PageCount) -> bool {
+        let addr = usize::from(addr);
+        let count = usize::from(count);
         if !self.enabled || addr < (self.start_page << PAGE_SHIFT) || addr > (self.end_page << PAGE_SHIFT) {
             return false;
         }

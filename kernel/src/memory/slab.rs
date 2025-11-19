@@ -5,6 +5,7 @@ use macros::slabs;
 use crate::lock::Lock;
 use crate::memory;
 use crate::memory::{address, hhdm};
+use crate::memory::address::PageCount;
 
 struct SlabNode {
     next: *mut SlabNode,
@@ -72,7 +73,7 @@ impl Slabs {
 
     fn allocate(&self, size: usize) -> &'static mut [u8] {
         if size > 2048 {
-            let addr = memory::alloc_pages(address::page_count_up(size)).expect("Out of memory");
+            let addr = memory::alloc_pages(PageCount::pages_up(size).expect("Out of memory");
             unsafe { core::slice::from_raw_parts_mut(hhdm::as_ptr(addr), size) }
         } else {
             let bit_len = max(usize::BITS - (size - 1).leading_zeros(), 3);

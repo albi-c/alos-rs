@@ -11,6 +11,7 @@ use core::ops::BitOr;
 use limine::request::{ExecutableAddressRequest, HhdmRequest, MemoryMapRequest};
 use crate::core_local;
 use crate::lock::Lock;
+use crate::memory::address::{PageCount, PhysAddrPageAligned};
 use crate::memory::physical::buddy_allocator::BuddyAllocator;
 use crate::memory::physical::{MemoryManager, PhysicalMemorySpace};
 use crate::memory::physical::map::MapEntry;
@@ -97,7 +98,7 @@ impl MemorySpace {
         func(&Self::get())
     }
 
-    pub fn phys_alloc(&self, count: usize) -> Option<usize> {
+    pub fn phys_alloc(&self, count: PageCount) -> Option<PhysAddrPageAligned> {
         assert!(count > 0);
         if count == 1 {
             PMM.write().alloc_page()
@@ -105,7 +106,7 @@ impl MemorySpace {
             PMM.write().alloc_pages(count)
         }
     }
-    pub fn phys_dealloc(&self, addr: usize, count: usize) {
+    pub fn phys_dealloc(&self, addr: PhysAddrPageAligned, count: PageCount) {
         assert!(count > 0);
         if count == 1 {
             PMM.write().dealloc_page(addr)
@@ -114,12 +115,12 @@ impl MemorySpace {
         }
     }
 
-    pub fn user_phys_alloc(&self, count: usize) -> Option<usize> {
+    pub fn user_phys_alloc(&self, count: PageCount) -> Option<PhysAddrPageAligned> {
         let addr = self.phys_alloc(count)?;
-        unsafe { hhdm::as_ptr::<u8>(addr).write_bytes(0, address::PAGE_SIZE * count); }
+        unsafe { hhdm::as_ptr::<u8>(addr.into()).write_bytes(0, count.size()); }
         Some(addr)
     }
-    pub fn user_phys_dealloc(&self, addr: usize, count: usize) {
+    pub fn user_phys_dealloc(&self, addr: PhysAddrPageAligned, count: PageCount) {
         self.phys_dealloc(addr, count);
     }
 
@@ -181,7 +182,7 @@ impl MemorySpace {
         assert!(count > 0);
         let mut map_lock = self.phys.map();
         let mut it = map_lock.iterate(
-            virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap()) });
+            virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap().into()) });
         for i in 0..count {
             let me = it.next();
             *me = MapEntry::new_with_flags(phys + i * address::PAGE_SIZE, flags(i).0).present();
@@ -219,32 +220,32 @@ pub fn init_core_local(InitValues(phys, virt_kernel): InitValues) {
     unsafe { MEMORY_SPACE.late_init(Arc::new(space)) };
 }
 
-pub fn alloc_page() -> Option<usize> {
+pub fn alloc_page() -> Option<PhysAddrPageAligned> {
     PMM.write().alloc_page()
 }
-pub fn alloc_page_zeroed() -> Option<usize> {
+pub fn alloc_page_zeroed() -> Option<PhysAddrPageAligned> {
     if let Some(addr) = alloc_page() {
-        unsafe { core::ptr::write_bytes(hhdm::as_ptr::<u8>(addr), 0, address::PAGE_SIZE) };
+        unsafe { core::ptr::write_bytes(hhdm::as_ptr::<u8>(addr.into()), 0, address::PAGE_SIZE) };
         Some(addr)
     } else {
         None
     }
 }
-pub fn dealloc_page(addr: usize) {
+pub fn dealloc_page(addr: PhysAddrPageAligned) {
     PMM.write().dealloc_page(addr)
 }
 
-pub fn alloc_pages(count: usize) -> Option<usize> {
+pub fn alloc_pages(count: PageCount) -> Option<PhysAddrPageAligned> {
     PMM.write().alloc_pages(count)
 }
-pub fn alloc_pages_zeroed(count: usize) -> Option<usize> {
+pub fn alloc_pages_zeroed(count: PageCount) -> Option<PhysAddrPageAligned> {
     if let Some(addr) = alloc_pages(count) {
-        unsafe { core::ptr::write_bytes(hhdm::as_ptr::<u8>(addr), 0, address::PAGE_SIZE * count) };
+        unsafe { core::ptr::write_bytes(hhdm::as_ptr::<u8>(addr.into()), 0, count.size()) };
         Some(addr)
     } else {
         None
     }
 }
-pub fn dealloc_pages(addr: usize, count: usize) {
+pub fn dealloc_pages(addr: PhysAddrPageAligned, count: PageCount) {
     PMM.write().dealloc_pages(addr, count)
 }
