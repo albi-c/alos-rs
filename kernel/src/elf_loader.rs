@@ -10,7 +10,7 @@ pub enum ElfError {
 }
 
 pub fn load_elf(data: &[u8]) -> Result<usize, ElfError> {
-    let file = ElfBytes::<NativeEndian>::minimal_parse(data).expect("invalid elf");
+    let file = ElfBytes::<NativeEndian>::minimal_parse(data).map_err(ElfError::Lib)?;
 
     for program in file.segments().ok_or(ElfError::Err("no program headers"))? {
         if program.p_type != 1 {

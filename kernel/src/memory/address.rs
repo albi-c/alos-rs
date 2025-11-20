@@ -286,18 +286,22 @@ impl VirtAddr {
         PhysAddr(hhdm::sub(self.0))
     }
 
-    pub fn as_ptr<T>(&self) -> *const T {
+    pub fn as_ptr<T>(self) -> *const T {
         self.0 as *const T
     }
-    pub unsafe fn as_ref<T>(&self) -> &T {
+    pub unsafe fn as_ref<'a, T>(self) -> &'a T {
         unsafe { &*self.as_ptr() }
     }
 
-    pub fn as_mut_ptr<T>(&self) -> *mut T {
+    pub fn as_mut_ptr<T>(self) -> *mut T {
         self.0 as *mut T
     }
-    pub unsafe fn as_mut<T>(&self) -> &mut T {
+    pub unsafe fn as_mut<'a, T>(self) -> &'a mut T {
         unsafe { &mut *self.as_mut_ptr() }
+    }
+
+    pub fn as_non_null<T>(self) -> Option<NonNull<T>> {
+        NonNull::new(self.as_mut_ptr())
     }
 }
 
@@ -347,18 +351,22 @@ impl VirtAddrPageAligned {
         PhysAddr(hhdm::sub(self.0))
     }
 
-    pub fn as_ptr<T>(&self) -> *const T {
+    pub fn as_ptr<T>(self) -> *const T {
         self.0 as *const T
     }
     pub unsafe fn as_ref<'a, T>(&self) -> &'a T {
         unsafe { &*self.as_ptr() }
     }
 
-    pub fn as_mut_ptr<T>(&self) -> *mut T {
+    pub fn as_mut_ptr<T>(self) -> *mut T {
         self.0 as *mut T
     }
-    pub unsafe fn as_mut<'a, T>(&self) -> &'a mut T {
+    pub unsafe fn as_mut<'a, T>(self) -> &'a mut T {
         unsafe { &mut *self.as_mut_ptr() }
+    }
+
+    pub fn as_non_null<T>(self) -> Option<NonNull<T>> {
+        NonNull::new(self.as_mut_ptr())
     }
 
     pub fn hhdm_offset() -> Self {

@@ -1,6 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::Cell;
 use core::cmp::max;
+use core::ptr::NonNull;
 use macros::slabs;
 use crate::lock::Lock;
 use crate::memory;
@@ -31,26 +32,30 @@ impl<const N: usize> SlabAllocator<N> {
         SlabAllocator { node: Cell::new(core::ptr::null_mut()) }
     }
 
-    pub fn allocate(&mut self) -> &'static mut [u8; N] {
+    pub fn allocate(&mut self) -> NonNull<u8> {
         if let Some(node) = unsafe { self.node.get().as_mut() } {
             self.node.set(node.next);
-            unsafe { core::mem::transmute(node) }
+            NonNull::from(node).cast()
         } else {
-            let addr = memory::alloc_page().expect("out of memory").hhdm_to_virt().as_mut_ptr::<u8>();
+            let addr = memory::alloc_page()
+                .expect("SlabAllocator::allocate: out of memory")
+                .hhdm_to_virt()
+                .as_mut_ptr::<u8>();
             let data = unsafe { core::slice::from_raw_parts_mut(addr, address::PAGE_SIZE) };
             let (chunks, rest) = data.as_chunks_mut::<N>();
             assert_eq!(rest.len(), 0);
             for chunk in chunks {
-                self.deallocate(chunk);
+                self.deallocate(NonNull::from(chunk).cast());
             }
-            let node = unsafe { self.node.get().as_mut() }.expect("No memory was allocated");
+            let node = unsafe { self.node.get().as_mut() }
+                .expect("SlabAllocator::allocate: No memory was allocated");
             self.node.set(node.next);
-            unsafe { core::mem::transmute(node) }
+            NonNull::from(node).cast()
         }
     }
 
-    pub fn deallocate(&mut self, data: &'static mut [u8; N]) {
-        let node: &'static mut SlabNode = unsafe { core::mem::transmute(data) };
+    pub fn deallocate(&mut self, data: NonNull<u8>) {
+        let node: &'static mut SlabNode = unsafe { data.cast().as_mut() };
         node.next = self.node.get();
         self.node.set(node as *mut _);
     }
@@ -71,42 +76,42 @@ impl Slabs {
         Slabs { container: Lock::new(SlabContainer::new()) }
     }
 
-    fn allocate(&self, size: usize) -> &'static mut [u8] {
+    fn allocate(&self, size: usize) -> NonNull<u8> {
         if size > 2048 {
-            let addr = memory::alloc_pages(PageCount::pages_up(size)).expect("out of memory");
-            unsafe { core::slice::from_raw_parts_mut(addr.hhdm_to_virt().as_mut_ptr(), size) }
+            memory::alloc_pages(PageCount::pages_up(size))
+                .expect("Slabs::allocate: out of memory")
+                .hhdm_to_virt()
+                .as_non_null()
+                .expect("Slabs::allocate: allocation failed")
         } else {
             let bit_len = max(usize::BITS - (size - 1).leading_zeros(), 3);
             self.container.write().allocate(bit_len as usize)
         }
     }
 
-    fn deallocate(&self, size: usize, memory: &'static mut [u8]) {
+    fn deallocate(&self, size: usize, memory: NonNull<u8>) {
         if size > 2048 {
-            memory::dealloc_pages(VirtAddr::from(memory).hhdm_to_phys().as_page_aligned()
-                                      .expect("deallocate: not page aligned"),
+            memory::dealloc_pages(VirtAddr::from(memory)
+                                      .hhdm_to_phys()
+                                      .as_page_aligned()
+                                      .expect("Slabs::deallocate: not page aligned"),
                                   PageCount::pages_up(size));
         } else {
             let bit_len = max(usize::BITS - (size - 1).leading_zeros(), 3);
-            self.container.write().deallocate(bit_len as usize, unsafe {
-                core::slice::from_raw_parts_mut(memory.as_mut_ptr(), 1 << bit_len) });
+            self.container.write().deallocate(bit_len as usize, memory);
         }
     }
 }
 
 unsafe impl GlobalAlloc for Slabs {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if layout.size() == 0 {
-            return core::ptr::dangling_mut();
-        }
-        self.allocate(layout.size()).as_mut_ptr()
+        assert_ne!(layout.size(), 0, "GlobalAlloc::alloc: layout size is 0");
+        self.allocate(layout.size()).as_ptr()
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let size = layout.size();
-        if size == 0 {
-            return;
-        }
-        self.deallocate(size, unsafe { core::slice::from_raw_parts_mut(ptr, size) })
+        assert_ne!(size, 0, "GlobalAlloc::dealloc: layout size is 0");
+        self.deallocate(size, NonNull::new(ptr).expect("GlobalAlloc::dealloc: null pointer"));
     }
 }

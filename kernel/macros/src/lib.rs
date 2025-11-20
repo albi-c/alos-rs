@@ -177,11 +177,11 @@ pub fn slabs(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         let SlabsSlab(shift, ident) = slab;
         if *shift == start {
             quote! {
-                0usize..=#shift => self.#ident.deallocate(memory.as_mut_array().unwrap()),
+                0usize..=#shift => self.#ident.deallocate(memory),
             }
         } else {
             quote! {
-                #shift => self.#ident.deallocate(memory.as_mut_array().unwrap()),
+                #shift => self.#ident.deallocate(memory),
             }
         }
     });
@@ -198,14 +198,14 @@ pub fn slabs(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 }
             }
 
-            fn allocate(&mut self, size_shift: usize) -> &'static mut [u8] {
+            fn allocate(&mut self, size_shift: usize) -> NonNull<u8> {
                 match size_shift {
                     #(#slab_alloc_match)*
                     _ => panic!("Invalid slab shift: {}", size_shift)
                 }
             }
 
-            fn deallocate(&mut self, size_shift: usize, memory: &'static mut [u8]) {
+            fn deallocate(&mut self, size_shift: usize, memory: NonNull<u8>) {
                 match size_shift {
                     #(#slab_dealloc_match)*
                     _ => panic!("Invalid slab shift: {}", size_shift)
