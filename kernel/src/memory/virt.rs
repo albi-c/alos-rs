@@ -43,7 +43,7 @@ impl VirtualMemorySpace {
                 None
             }
         ).next()?;
-        if usize::from(rem) != 0 {
+        if rem != 0 {
             self.data.insert(base + size, MemoryAllocation::free(rem));
         }
         Some(base)
@@ -53,12 +53,12 @@ impl VirtualMemorySpace {
         let mut cur = self.data.upper_bound_mut(Bound::Included(&addr));
         let (&base, entry) = cur.prev()?;
         let diff = addr - base;
-        if usize::from(diff) == 0 {
+        if diff == 0 {
             if entry.length >= size {
                 let rem = entry.length - size;
                 entry.length = size;
                 entry.allocated = true;
-                if usize::from(rem) > 0 {
+                if rem > 0 {
                     self.data.insert(base + size, MemoryAllocation::free(rem));
                 }
                 Some(())
@@ -71,7 +71,7 @@ impl VirtualMemorySpace {
                 entry.length = diff;
                 let rem = rest - size;
                 self.data.insert(addr, MemoryAllocation::allocated(size));
-                if usize::from(rem) > 0 {
+                if rem > 0 {
                     self.data.insert(addr + size, MemoryAllocation::free(rem));
                 }
                 Some(())

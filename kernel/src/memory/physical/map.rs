@@ -1,7 +1,7 @@
 use core::arch::asm;
 use crate::memory::hhdm;
 use crate::{print, println};
-use crate::memory::address::VirtAddrPageAligned;
+use crate::memory::address::{PageCount, VirtAddrPageAligned};
 
 #[derive(Debug, Copy, Clone)]
 pub struct MapEntry(pub u64);
@@ -50,7 +50,7 @@ impl MapEntry {
 
     #[inline(always)]
     pub fn with_flags(self, flags: u64) -> Self {
-        MapEntry(self.0 | (flags & Self::MASK_FLAGS))
+        MapEntry((self.0 & Self::MASK_ADDR) | (flags & Self::MASK_FLAGS))
     }
 
     #[inline(always)]
@@ -200,20 +200,25 @@ impl MemoryMap {
     }
 
     #[inline]
-    pub fn get_index(addr: usize, level: u8) -> usize {
-        (addr >> (12 + 9 * (level - 1))) & 0x1ff
+    pub fn get_index(addr: VirtAddrPageAligned, level: usize) -> usize {
+        (addr.addr() >> (12 + 9 * (level - 1))) & 0x1ff
     }
 
     #[inline(always)]
-    pub fn get_index_c<const L: u8>(addr: usize) -> usize {
-        (addr >> (12 + 9 * (L - 1))) & 0x1ff
+    pub fn get_index_c<const L: usize>(addr: VirtAddrPageAligned) -> usize {
+        (addr.addr() >> (12 + 9 * (L - 1))) & 0x1ff
     }
 
-    pub fn get_indices(addr: usize) -> [usize; 4] {
+    pub fn get_indices(addr: VirtAddrPageAligned) -> [usize; 4] {
         [
             Self::get_index_c::<4>(addr), Self::get_index_c::<3>(addr),
             Self::get_index_c::<2>(addr), Self::get_index_c::<1>(addr),
         ]
+    }
+
+    #[inline(always)]
+    pub fn index_to_page_count(index: usize, level: usize) -> PageCount {
+        PageCount::new(index << (9 * (level - 1)))
     }
 
     #[inline(always)]
@@ -224,6 +229,59 @@ impl MemoryMap {
     #[inline(always)]
     pub fn at(&mut self, index: usize) -> &mut MapEntry {
         &mut self.data[index]
+    }
+
+    pub fn at_addr(&mut self, addr: VirtAddrPageAligned) -> Option<&mut MapEntry> {
+        let indices = Self::get_indices(addr);
+        Some(self
+            .at(indices[0]).as_map()?
+            .at(indices[1]).as_map()?
+            .at(indices[2]).as_map()?
+            .at(indices[3]))
+    }
+
+    fn iter_present_in_range_start(&mut self, base: VirtAddrPageAligned, start: VirtAddrPageAligned,
+                                   end: VirtAddrPageAligned, level: usize)  -> impl Iterator<Item = (&mut MapEntry, VirtAddrPageAligned)> {
+        // TODO: fix
+        // TODO: optimize skip_while and take_while
+        self.data
+            .iter_mut()
+            .enumerate()
+            .map(move |(i, entry)| (i, entry, base + Self::index_to_page_count(i, level)))
+            // .inspect(move |(i, _, addr)| println!("{i} {addr:x?} {start:x?} {end:x?}"))
+            .skip_while(move |&(_, _, addr)| addr + Self::index_to_page_count(1, level) < start)
+            // .inspect(move |(i, _, addr)| println!("ns {i} {addr:x?} {start:x?} {end:x?}"))
+            .take_while(move |&(_, _, addr)| addr < end + Self::index_to_page_count(1, level))
+            // .inspect(move |(i, _, addr)| println!("tk {i} {addr:x?} {start:x?} {end:x?}"))
+            .filter_map(move |(_, entry, addr)| entry
+                .is_present()
+                .then_some((entry, addr)))
+            // .inspect(|(entry, addr)| println!("ipirs {:x?} {:x?}", entry, addr))
+    }
+
+    fn iter_present_in_range_level(&mut self, base: VirtAddrPageAligned, start: VirtAddrPageAligned,
+                                   end: VirtAddrPageAligned, level: usize, func: &mut impl FnMut(&mut MapEntry, VirtAddrPageAligned)) {
+        if level == 1 {
+            Self::iter_present_in_range_start(self, base, start, end, level)
+                .for_each(move |(entry, addr)| func(entry, addr))
+        } else {
+            Self::iter_present_in_range_start(self, base, start, end, level)
+                .for_each(move |(entry, addr)| entry
+                    .as_map().unwrap()
+                    .iter_present_in_range_level(addr, start, end, level - 1, func))
+        }
+    }
+
+    pub fn iter_present_in_range(&mut self, start: VirtAddrPageAligned,
+                                 end: VirtAddrPageAligned, mut func: impl FnMut(&mut MapEntry, VirtAddrPageAligned)) {
+        // self.iter_present_in_range_level(
+        //     VirtAddrPageAligned::new(0).unwrap(), start, end, 4, &mut func)
+        for addr in start.page_count()..end.page_count() {
+            let addr = addr.as_virt_addr();
+            if let Some(entry) = self.at_addr(addr) {
+                func(entry, addr)
+            }
+        }
     }
 
     pub fn map_or_insert(&mut self, index: usize,
@@ -250,7 +308,7 @@ impl MemoryMap {
 
     pub fn iterate<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: VirtAddrPageAligned,
                                                          mut alloc: A) -> MemoryMapIterator<'_, 4, A> {
-        let indices = Self::get_indices(usize::from(addr));
+        let indices = Self::get_indices(addr);
 
         let m1 = self.map_or_insert(indices[0], || alloc());
         let m2 = m1.map_or_insert(indices[1], || alloc());
@@ -266,7 +324,7 @@ impl MemoryMap {
 
     pub fn iterate_3<A: FnMut() -> &'static mut MemoryMap>(&mut self, addr: VirtAddrPageAligned,
                                                             mut alloc: A) -> MemoryMapIterator<'_, 3, A> {
-        let [indices @ .., _] = Self::get_indices(usize::from(addr));
+        let [indices @ .., _] = Self::get_indices(addr);
 
         let m1 = self.map_or_insert(indices[0], || alloc());
         let m2 = m1.map_or_insert(indices[1], || alloc());

@@ -143,6 +143,17 @@ macro_rules! addr_to_from_usize {
     };
 }
 
+macro_rules! addr_usize_addr {
+    ($addr:ident) => {
+        impl $addr {
+            #[inline(always)]
+            pub fn addr(self) -> usize {
+                self.0
+            }
+        }
+    };
+}
+
 macro_rules! addr_cmp {
     ($addr:ident) => {
         impl PartialEq<usize> for $addr {
@@ -193,6 +204,10 @@ impl PageCount {
         VirtAddrPageAligned(self.size())
     }
 
+    #[inline(always)]
+    pub fn count(self) -> usize {
+        self.0
+    }
     #[inline(always)]
     pub fn size(self) -> usize {
         self.0 << PAGE_SHIFT
@@ -256,6 +271,7 @@ addr_add_sub_page_count!(PhysAddr);
 addr_add_sub_usize!(PhysAddr);
 addr_alignment!(PhysAddr, PhysAddrPageAligned);
 addr_to_from_usize!(PhysAddr);
+addr_usize_addr!(PhysAddr);
 addr_cmp!(PhysAddr);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -276,6 +292,7 @@ impl PhysAddrPageAligned {
 addr_add_sub_page_count!(PhysAddrPageAligned);
 addr_cmp!(PhysAddrPageAligned);
 addr_page_count_diff!(PhysAddrPageAligned);
+addr_usize_addr!(PhysAddrPageAligned);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
@@ -309,6 +326,7 @@ addr_add_sub_page_count!(VirtAddr);
 addr_add_sub_usize!(VirtAddr);
 addr_alignment!(VirtAddr, VirtAddrPageAligned);
 addr_to_from_usize!(VirtAddr);
+addr_usize_addr!(VirtAddr);
 addr_cmp!(VirtAddr);
 
 impl<T: ?Sized> From<*const T> for VirtAddr {
@@ -377,6 +395,7 @@ impl VirtAddrPageAligned {
 addr_add_sub_page_count!(VirtAddrPageAligned);
 addr_cmp!(VirtAddrPageAligned);
 addr_page_count_diff!(VirtAddrPageAligned);
+addr_usize_addr!(VirtAddrPageAligned);
 
 impl<T: ?Sized> TryFrom<*const T> for VirtAddrPageAligned {
     type Error = ();
@@ -415,6 +434,7 @@ impl UserVirtAddr {
 addr_add_sub_page_count!(UserVirtAddr);
 addr_add_sub_usize!(UserVirtAddr);
 addr_to_from_usize!(UserVirtAddr);
+addr_usize_addr!(UserVirtAddr);
 addr_cmp!(UserVirtAddr);
 
 #[inline(always)]

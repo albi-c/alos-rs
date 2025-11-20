@@ -7,9 +7,9 @@ mod slab;
 
 use alloc::sync::Arc;
 use core::arch::asm;
-use core::ops::BitOr;
+use core::ops::{BitOr, BitOrAssign};
 use limine::request::{ExecutableAddressRequest, HhdmRequest, MemoryMapRequest};
-use crate::core_local;
+use crate::{core_local, println};
 use crate::lock::Lock;
 use crate::memory::address::{PageCount, PhysAddrPageAligned, VirtAddr, VirtAddrPageAligned};
 use crate::memory::physical::buddy_allocator::BuddyAllocator;
@@ -49,6 +49,7 @@ impl MemoryFlags {
     pub const DEFAULT_RO: Self = Self(Self::NO_EXEC.0);
     pub const DEFAULT_RW: Self = Self(Self::NO_EXEC.0 | Self::WRITE.0);
     pub const DEFAULT_EXEC: Self = Self(0);
+    pub const DEFAULT_URW: Self = Self(Self::USER.0 | Self::WRITE.0 | Self::NO_EXEC.0);
 }
 
 impl BitOr for MemoryFlags {
@@ -56,6 +57,11 @@ impl BitOr for MemoryFlags {
 
     fn bitor(self, rhs: Self) -> Self::Output {
         Self(self.0 | rhs.0)
+    }
+}
+impl BitOrAssign for MemoryFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
     }
 }
 
@@ -179,15 +185,27 @@ impl MemorySpace {
         let mut map_lock = self.phys.map();
         let mut it = map_lock.iterate(
             virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap().into()) });
-        for i in 0.into()..count {
+        for i in 0..count.count() {
             let me = it.next();
-            *me = MapEntry::new_with_flags(usize::from(phys + i), flags(usize::from(i)).0).present();
+            *me = MapEntry::new_with_flags((phys + PageCount::new(i)).addr(), flags(i).0).present();
         }
     }
-    pub fn unmap(&mut self, virt: usize, count: usize) {
-        assert!(address::is_page_aligned(virt));
+    pub fn unmap(&self, virt: VirtAddrPageAligned, count: PageCount) {
         assert!(count > 0);
-        todo!()
+        println!("unmapping {:#x?}..{:#x?}", virt.addr(), (virt + count).addr());
+        let mut map_lock = self.phys.map();
+        map_lock.iter_present_in_range(virt, virt + count, |entry, addr| {
+            println!("unmapping Page({:#x?}) @ {:#x?}", entry.addr(), addr.addr());
+        });
+    }
+    pub fn protect(&self, virt: VirtAddrPageAligned, count: PageCount, flags: MemoryFlags) {
+        assert!(count > 0);
+        println!("protecting {:#x?}..{:#x?} as {:#x?}", virt.addr(), (virt + count).addr(), flags.0);
+        let mut map_lock = self.phys.map();
+        map_lock.iter_present_in_range(virt, virt + count, |entry, addr| {
+            println!("protecting Page({:#x?} -> {:#x?}) @ {:#x?}", entry.0, entry.with_flags(flags.0).present().0, addr.addr());
+            *entry = entry.with_flags(flags.0).present();
+        });
     }
 }
 
