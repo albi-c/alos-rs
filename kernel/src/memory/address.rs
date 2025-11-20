@@ -397,6 +397,26 @@ impl<T: ?Sized> TryFrom<NonNull<T>> for VirtAddrPageAligned {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct UserVirtAddr(usize);
+
+impl UserVirtAddr {
+    pub fn check_read(self, _length: usize) -> Option<VirtAddr> {
+        // TODO: check mapping
+        Some(VirtAddr(self.0))
+    }
+    pub fn check_write(self, _length: usize) -> Option<VirtAddr> {
+        // TODO: check mapping
+        Some(VirtAddr(self.0))
+    }
+}
+
+addr_add_sub_page_count!(UserVirtAddr);
+addr_add_sub_usize!(UserVirtAddr);
+addr_to_from_usize!(UserVirtAddr);
+addr_cmp!(UserVirtAddr);
+
 #[inline(always)]
 pub fn is_page_aligned(addr: usize) -> bool {
     addr & PAGE_MASK == 0

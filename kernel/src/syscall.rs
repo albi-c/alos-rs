@@ -1,6 +1,7 @@
 use core::arch::global_asm;
 use crate::cpu::{msr_read, msr_write};
 use crate::{print, println};
+use crate::memory::address::UserVirtAddr;
 use crate::task::sched_exit;
 
 const MSR_EFER: u32 = 0xc0000080;
@@ -26,11 +27,23 @@ extern "C" fn syscall_debug(p1: u64, p2: u64, p3: u64, p4: u64, p5: u64, p6: u64
     0
 }
 
-extern "C" fn syscall_write(file: i32, buf: *const u8, count: usize) -> i64 {
-    if file != 1 && file != 2 {
+extern "C" fn syscall_write(file: i32, buf: UserVirtAddr, count: usize) -> i64 {
+    if count > isize::MAX as usize {
+        println!("[syscall: write] count too large");
+        -4i64
+    } else if file != 1 && file != 2 {
         println!("[syscall: write] invalid file");
         -1i64
     } else {
+        if count == 0 {
+            return 0;
+        }
+        let buf = if let Some(buf) = buf.check_read(count) {
+            buf.as_mut_ptr()
+        } else {
+            println!("[syscall: write] invalid buffer");
+            return -3i64
+        };
         let buf = unsafe { core::slice::from_raw_parts(buf, count) };
         if let Ok(string) = core::str::from_utf8(buf) {
             print!("{}", string);
@@ -42,7 +55,7 @@ extern "C" fn syscall_write(file: i32, buf: *const u8, count: usize) -> i64 {
     }
 }
 
-extern "C" fn syscall_exit(code: i64) -> ! {
+extern "C" fn syscall_exit(code: i32) -> ! {
     println!("[syscall: exit] code {}", code);
     sched_exit()
 }
