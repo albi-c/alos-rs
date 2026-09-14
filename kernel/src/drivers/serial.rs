@@ -24,6 +24,18 @@ pub fn read() -> Option<u8> {
 
 pub struct Serial;
 
+impl Serial {
+    pub fn write_char_n(&mut self, ch: char, count: usize) {
+        let mut buf = [0u8; 4];
+        let bytes = ch.encode_utf8(&mut buf).as_bytes();
+        for _ in 0..count {
+            for &b in bytes {
+                write(b);
+            }
+        }
+    }
+}
+
 impl Write for Serial {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for ch in s.bytes() {

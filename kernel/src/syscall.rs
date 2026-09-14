@@ -1,6 +1,6 @@
 use core::arch::global_asm;
 use crate::cpu::{msr_read, msr_write};
-use crate::{print, println};
+use crate::{print, print_char_n, println};
 use crate::memory::address::UserVirtAddr;
 use crate::task::sched_exit;
 
@@ -47,8 +47,8 @@ extern "C" fn syscall_write(file: i32, buf: UserVirtAddr, count: usize) -> i64 {
     };
     for chunk in buf.utf8_chunks() {
         print!("{}", chunk.valid());
-        for _ in chunk.invalid() {
-            print!("\u{fffd}");
+        if chunk.invalid().len() > 0 {
+            print_char_n!(char::REPLACEMENT_CHARACTER, chunk.invalid().len());
         }
     }
     count as i64
