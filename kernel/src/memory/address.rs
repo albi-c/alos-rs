@@ -1,6 +1,7 @@
 use core::iter::Step;
 use core::ops::{Add, AddAssign, Mul, Shl, Shr, Sub, SubAssign};
 use core::ptr::NonNull;
+use bytemuck::Pod;
 use crate::memory::{hhdm, MemorySpace};
 
 pub const PAGE_SHIFT: u8 = 12;
@@ -446,6 +447,15 @@ impl UserVirtAddr {
     }
     pub fn check_write(self, length: usize) -> Option<VirtAddr> {
         MemorySpace::get().user_check_write(self, length).then_some(VirtAddr(self.0))
+    }
+
+    pub fn as_slice<'a, T: Pod>(self, length: usize) -> Option<&'a [T]> {
+        self.check_read(length)
+            .map(|addr| unsafe { core::slice::from_raw_parts(addr.as_ptr(), length) })
+    }
+    pub fn as_slice_mut<'a, T: Pod>(self, length: usize) -> Option<&'a mut [T]> {
+        self.check_write(length)
+            .map(|addr| unsafe { core::slice::from_raw_parts_mut(addr.as_mut_ptr(), length) })
     }
 }
 

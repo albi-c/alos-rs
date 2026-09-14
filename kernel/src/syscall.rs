@@ -39,13 +39,12 @@ extern "C" fn syscall_write(file: i32, buf: UserVirtAddr, count: usize) -> i64 {
     if count == 0 {
         return 0;
     }
-    let buf = if let Some(buf) = buf.check_read(count) {
-        buf.as_mut_ptr()
+    let buf = if let Some(buf) = buf.as_slice::<u8>(count) {
+        buf
     } else {
         println!("[syscall: write] invalid source buffer");
         return -2i64;
     };
-    let buf = unsafe { core::slice::from_raw_parts::<u8>(buf, count) };
     for chunk in buf.utf8_chunks() {
         print!("{}", chunk.valid());
         for _ in chunk.invalid() {

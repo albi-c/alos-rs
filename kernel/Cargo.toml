@@ -20,8 +20,9 @@ smp = []
 [dependencies]
 macros = { path = "macros" }
 limine = "0.4"
-spin = "0.10.0"
+spin = "0.12.3"
 paste = "1.0.15"
 acpi = "6.0.1"
 elf = { version = "0.8.0", default-features = false, features = ["alloc"] }
-elf_loader = { version = "0.13.0", default-features = false, features = [] }
+elf_loader = { version = "0.17.0", default-features = false, features = [] }
+bytemuck = "1.25.2"
