@@ -1,3 +1,4 @@
+use alloc::collections::btree_map::CursorMut;
 use alloc::collections::BTreeMap;
 use core::ops::Bound;
 use crate::memory::address::{PageCount, VirtAddr, VirtAddrPageAligned};
@@ -65,6 +66,25 @@ pub struct VirtualMemorySpace {
     data: BTreeMap<VirtAddrPageAligned, MemoryAllocation>,
 }
 
+fn insert_entry(cursor: &mut CursorMut<VirtAddrPageAligned, MemoryAllocation>,
+                mut addr: VirtAddrPageAligned, mut alloc: MemoryAllocation) {
+    assert!(alloc.length > 0, "length of an entry must be greater than zero");
+
+    if let Some((&prev_addr, &mut prev_alloc)) = cursor.peek_prev()
+        && prev_alloc.allocated == alloc.allocated && prev_addr + prev_alloc.length == addr {
+        cursor.remove_prev().unwrap();
+        addr = prev_addr;
+        alloc.length += prev_alloc.length;
+    }
+    if let Some((&next_addr, &mut next_alloc)) = cursor.peek_next()
+        && next_alloc.allocated == alloc.allocated && addr + alloc.length == next_addr {
+        cursor.remove_next().unwrap();
+        alloc.length += next_alloc.length;
+    }
+
+    cursor.insert_before(addr, alloc).expect("failed to insert entry");
+}
+
 impl VirtualMemorySpace {
     pub fn new(start: VirtAddr, length: PageCount) -> Self {
         VirtualMemorySpace {
@@ -126,53 +146,44 @@ impl VirtualMemorySpace {
     
     pub fn deallocate(&mut self, start: VirtAddrPageAligned, size: PageCount) {
         // TODO: callback for physical memory deallocation
-        let base_with_length = BaseWithLength(start, size);
+        let selection = BaseWithLength(start, size);
         println!("deallocating {:x?} +{:x?}", start, size);
-        let end = base_with_length.end();
+        let end = selection.end();
         let mut cur = self.data.lower_bound_mut(Bound::Unbounded);
-        while let Some((&base, entry)) = cur.next() {
-            if !entry.allocated {
+        while let Some((&base, &mut alloc)) = cur.next() {
+            if !alloc.allocated {
                 continue;
             }
-            let entry_end = base + entry.length;
+            let entry_end = base + alloc.length;
             if entry_end <= start {
                 continue;
             }
             if base >= end {
                 break;
             }
-            println!("deallocate {:x?} +{:x?} {:x?}", base, entry.length, BaseWithLength(base, entry.length).intersect(base_with_length));
-            match BaseWithLength(base, entry.length).intersect(base_with_length) {
+            let entry = BaseWithLength(base, alloc.length);
+            println!("deallocate {:x?} +{:x?} {:x?}", base, alloc.length, entry.intersect(selection));
+            match entry.intersect(selection) {
                 AddrIntersection::None => {},
                 AddrIntersection::All => {
-                    entry.allocated = false;
-                    let entry = *entry;
-                    cur.prev().unwrap();
-                    if let Some(prev) = cur.peek_prev() {
-                        if !prev.1.allocated {
-                            prev.1.length = prev.1.length + entry.length;
-                            cur.remove_next().unwrap();
-                        } else {
-                            cur.next().unwrap();
-                        }
-                    }
-                    if let Some(next) = cur.peek_next() {
-                        if !next.1.allocated {
-                            let length = next.1.length;
-                            cur.remove_next().unwrap();
-                            let prev = cur.peek_prev().unwrap();
-                            prev.1.length = prev.1.length + length;
-                        }
-                    }
+                    cur.remove_prev().unwrap();
+                    insert_entry(&mut cur, entry.start(), MemoryAllocation::free(entry.length()));
                 },
-                AddrIntersection::PartialMid(bwl) => {
-                    todo!()
+                AddrIntersection::PartialMid(sel) => {
+                    cur.remove_prev().unwrap();
+                    insert_entry(&mut cur, entry.start(), MemoryAllocation::allocated(sel.start() - entry.start()));
+                    insert_entry(&mut cur, sel.start(), MemoryAllocation::free(sel.length()));
+                    insert_entry(&mut cur, sel.end(), MemoryAllocation::allocated(entry.end() - sel.end()));
                 },
-                AddrIntersection::PartialUp(up) => {
-                    todo!()
+                AddrIntersection::PartialUp(sel_start) => {
+                    cur.remove_prev().unwrap();
+                    insert_entry(&mut cur, entry.start(), MemoryAllocation::allocated(sel_start - entry.start()));
+                    insert_entry(&mut cur, sel_start, MemoryAllocation::free(entry.end() - sel_start));
                 },
-                AddrIntersection::PartialDown(down) => {
-                    todo!()
+                AddrIntersection::PartialDown(sel_end) => {
+                    cur.remove_prev().unwrap();
+                    insert_entry(&mut cur, entry.start(), MemoryAllocation::free(sel_end - entry.start()));
+                    insert_entry(&mut cur, sel_end, MemoryAllocation::allocated(entry.end() - sel_end));
                 },
             }
         }

@@ -276,6 +276,7 @@ extern "C" fn kernel_stack_underflow() -> ! {
 #[derive(Debug)]
 #[repr(C)]
 pub struct Task {
+    // if layout changes, used offset of kernel_stack in task.asm has to be changed
     pub kernel_stack: NonNull<u8>,
     pub kernel_stack_base: NonNull<u8>,
     pub kernel_stack_start: NonNull<u8>,
@@ -286,6 +287,7 @@ pub struct Task {
     pub time: usize,
     pub core: usize,
 
+    // if layout changes, used offset of id in task.asm has to be changed
     pub id: usize,
     pub state: TaskState,
     pub flags: u32,
@@ -324,7 +326,7 @@ fn allocate_kernel_stack<T: Sized>(size: usize, func: Option<(extern "C" fn(Box<
     stack[offset+CALLEE_SAVED_REGS..offset+CALLEE_SAVED_REGS+INIT_VALUES].copy_from_slice(&[
         param,
         func,
-        kernel_stack_underflow as usize,
+        kernel_stack_underflow as *const () as usize,
         0,
     ]);
     (top.cast(), base.cast())

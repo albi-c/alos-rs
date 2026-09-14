@@ -64,6 +64,7 @@ pub fn core_info() -> &'static CoreInfo {
     core_info_local().get()
 }
 
+// if layout changes, used offset of Cell<usize> in task.asm has to be changed
 #[repr(C)]
 pub struct CoreLocal<T>(Cell<usize>, PhantomData<T>);
 

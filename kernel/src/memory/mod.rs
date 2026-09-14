@@ -7,11 +7,11 @@ mod slab;
 
 use alloc::sync::Arc;
 use core::arch::asm;
-use core::ops::{BitOr, BitOrAssign};
+use core::ops::{BitAnd, BitOr, BitOrAssign};
 use limine::request::{ExecutableAddressRequest, HhdmRequest, MemoryMapRequest};
 use crate::{core_local, println};
 use crate::lock::Lock;
-use crate::memory::address::{PageCount, PhysAddrPageAligned, VirtAddr, VirtAddrPageAligned};
+use crate::memory::address::{PageCount, PhysAddrPageAligned, UserVirtAddr, VirtAddr, VirtAddrPageAligned};
 use crate::memory::physical::buddy_allocator::BuddyAllocator;
 use crate::memory::physical::{MemoryManager, PhysicalMemorySpace};
 use crate::memory::physical::map::MapEntry;
@@ -62,6 +62,13 @@ impl BitOr for MemoryFlags {
 impl BitOrAssign for MemoryFlags {
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
+    }
+}
+impl BitAnd for MemoryFlags {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
     }
 }
 
@@ -206,6 +213,32 @@ impl MemorySpace {
             println!("protecting Page({:#x?} -> {:#x?}) @ {:#x?}", entry.0, entry.with_flags(flags.0).present().0, addr.addr());
             *entry = entry.with_flags(flags.0).present();
         });
+    }
+
+    pub fn user_check_flags(&self, user_virt: UserVirtAddr, length: usize, flags: MemoryFlags) -> bool {
+        if length == 0 {
+            return true;
+        }
+        let flags = flags.0;
+        let virt = VirtAddr::new(user_virt.addr()).page_align_down();
+        let count = PageCount::pages_up(length + (user_virt.addr() - virt.addr()));
+
+        let mut map_lock = self.phys.map();
+        let mut checked = 0;
+        map_lock.iter_present_in_range(virt, virt + count, |entry, _| {
+            if (entry.flags() & flags) == flags {
+                checked += 1;
+            }
+        });
+
+        checked == count.count()
+    }
+
+    pub fn user_check_read(&self, virt: UserVirtAddr, length: usize) -> bool {
+        self.user_check_flags(virt, length, MemoryFlags::USER)
+    }
+    pub fn user_check_write(&self, virt: UserVirtAddr, length: usize) -> bool {
+        self.user_check_flags(virt, length, MemoryFlags::USER | MemoryFlags::WRITE)
     }
 }
 

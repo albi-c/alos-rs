@@ -1,7 +1,7 @@
 use core::iter::Step;
-use core::ops::{Add, Mul, Shl, Shr, Sub};
+use core::ops::{Add, AddAssign, Mul, Shl, Shr, Sub, SubAssign};
 use core::ptr::NonNull;
-use crate::memory::hhdm;
+use crate::memory::{hhdm, MemorySpace};
 
 pub const PAGE_SHIFT: u8 = 12;
 pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
@@ -232,8 +232,18 @@ impl Step for PageCount {
         Some(Self(start.0.checked_add(count)?))
     }
 
+    fn forward_overflowing(start: Self, count: usize) -> (Self, bool) {
+        let (page, overflow) = start.0.overflowing_add(count);
+        (Self(page), overflow)
+    }
+
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
         Some(Self(start.0.checked_sub(count)?))
+    }
+
+    fn backward_overflowing(start: Self, count: usize) -> (Self, bool) {
+        let (page, overflow) = start.0.overflowing_sub(count);
+        (Self(page), overflow)
     }
 }
 
@@ -247,6 +257,16 @@ impl Sub<PageCount> for PageCount {
     type Output = PageCount;
     fn sub(self, rhs: PageCount) -> Self::Output {
         PageCount(self.0 - rhs.0)
+    }
+}
+impl AddAssign<PageCount> for PageCount {
+    fn add_assign(&mut self, rhs: PageCount) {
+        self.0 += rhs.0;
+    }
+}
+impl SubAssign<PageCount> for PageCount {
+    fn sub_assign(&mut self, rhs: PageCount) {
+        self.0 -= rhs.0;
     }
 }
 simple_op!(PageCount, Add, add);
@@ -421,13 +441,11 @@ impl<T: ?Sized> TryFrom<NonNull<T>> for VirtAddrPageAligned {
 pub struct UserVirtAddr(usize);
 
 impl UserVirtAddr {
-    pub fn check_read(self, _length: usize) -> Option<VirtAddr> {
-        // TODO: check mapping
-        Some(VirtAddr(self.0))
+    pub fn check_read(self, length: usize) -> Option<VirtAddr> {
+        MemorySpace::get().user_check_read(self, length).then_some(VirtAddr(self.0))
     }
-    pub fn check_write(self, _length: usize) -> Option<VirtAddr> {
-        // TODO: check mapping
-        Some(VirtAddr(self.0))
+    pub fn check_write(self, length: usize) -> Option<VirtAddr> {
+        MemorySpace::get().user_check_write(self, length).then_some(VirtAddr(self.0))
     }
 }
 

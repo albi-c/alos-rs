@@ -3,13 +3,9 @@
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(negative_impls)]
 #![feature(unsafe_cell_access)]
-#![feature(slice_as_array)]
 #![feature(btree_cursors)]
 #![feature(slice_from_ptr_range)]
 #![feature(abi_x86_interrupt)]
-#![feature(thread_local)]
-#![feature(transmutability)]
-#![feature(push_mut)]
 #![feature(step_trait)]
 extern crate alloc;
 

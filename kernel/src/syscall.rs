@@ -30,29 +30,29 @@ extern "C" fn syscall_debug(p1: u64, p2: u64, p3: u64, p4: u64, p5: u64, p6: u64
 extern "C" fn syscall_write(file: i32, buf: UserVirtAddr, count: usize) -> i64 {
     if count > isize::MAX as usize {
         println!("[syscall: write] count too large");
-        -4i64
-    } else if file != 1 && file != 2 {
+        return -3i64;
+    }
+    if file != 1 && file != 2 {
         println!("[syscall: write] invalid file");
-        -1i64
+        return -1i64;
+    }
+    if count == 0 {
+        return 0;
+    }
+    let buf = if let Some(buf) = buf.check_read(count) {
+        buf.as_mut_ptr()
     } else {
-        if count == 0 {
-            return 0;
-        }
-        let buf = if let Some(buf) = buf.check_read(count) {
-            buf.as_mut_ptr()
-        } else {
-            println!("[syscall: write] invalid buffer");
-            return -3i64
-        };
-        let buf = unsafe { core::slice::from_raw_parts(buf, count) };
-        if let Ok(string) = core::str::from_utf8(buf) {
-            print!("{}", string);
-            count as i64
-        } else {
-            println!("[syscall: write] invalid utf8");
-            -2i64
+        println!("[syscall: write] invalid source buffer");
+        return -2i64;
+    };
+    let buf = unsafe { core::slice::from_raw_parts::<u8>(buf, count) };
+    for chunk in buf.utf8_chunks() {
+        print!("{}", chunk.valid());
+        for _ in chunk.invalid() {
+            print!("\u{fffd}");
         }
     }
+    count as i64
 }
 
 extern "C" fn syscall_exit(code: i32) -> ! {
@@ -62,7 +62,7 @@ extern "C" fn syscall_exit(code: i32) -> ! {
 
 macro_rules! syscall {
     ($n:literal, $f:ident) => {
-        unsafe { SYSCALL_TABLE[$n] = $f as u64 };
+        unsafe { SYSCALL_TABLE[$n] = $f as *const () as u64 };
     };
 }
 
@@ -72,7 +72,7 @@ pub fn init() {
     syscall!(2, syscall_exit);
 
     msr_write(MSR_STAR, ((0x10 | 0x3) << 48) | (0x8 << 32));
-    msr_write(MSR_LSTAR, _syscall_entry as u64);
+    msr_write(MSR_LSTAR, _syscall_entry as *const () as u64);
     msr_write(MSR_CSTAR, 0);
     msr_write(MSR_SFMASK, 0x200);
 
