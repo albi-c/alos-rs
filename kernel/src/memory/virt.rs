@@ -95,70 +95,65 @@ impl VirtualMemorySpace {
         }
     }
 
-    pub fn allocate(&mut self, size: PageCount) -> Option<VirtAddrPageAligned> {
-        let (base, rem) = self.data.iter_mut().filter_map(
-            |(&base, entry)| if !entry.allocated && entry.length >= size {
+    pub fn allocate_at(&mut self, addr: VirtAddrPageAligned, size: PageCount,
+                       allow_after: bool) -> Option<VirtAddrPageAligned> {
+        let mut cur = self.data.upper_bound_mut(Bound::Included(&addr));
+        cur.prev();
+        while let Some((&base, entry)) = cur.next() {
+            if entry.allocated || entry.length < size {
+                if allow_after {
+                    continue;
+                } else {
+                    break;
+                }
+            }
+            return if base < addr {
+                let diff = addr - base;
+                if entry.length - diff < size {
+                    if allow_after {
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+                let rem = entry.length - diff - size;
+                entry.length = diff;
+                insert_entry(&mut cur, addr, MemoryAllocation::allocated(size));
+                if rem > 0 {
+                    insert_entry(&mut cur, addr + size, MemoryAllocation::free(rem));
+                }
+                Some(addr)
+            } else {
                 let rem = entry.length - size;
                 entry.allocated = true;
                 entry.length = size;
-                Some((base, rem))
-            } else {
-                None
-            }
-        ).next()?;
-        if rem != 0 {
-            self.data.insert(base + size, MemoryAllocation::free(rem));
+                if rem > 0 {
+                    insert_entry(&mut cur, base + size, MemoryAllocation::free(rem));
+                }
+                Some(base)
+            };
         }
-        Some(base)
+        None
     }
 
-    pub fn allocate_at(&mut self, addr: VirtAddrPageAligned, size: PageCount) -> Option<()> {
-        let mut cur = self.data.upper_bound_mut(Bound::Included(&addr));
-        let (&base, entry) = cur.prev()?;
-        let diff = addr - base;
-        if diff == 0 {
-            if entry.length >= size {
-                let rem = entry.length - size;
-                entry.length = size;
-                entry.allocated = true;
-                if rem > 0 {
-                    self.data.insert(base + size, MemoryAllocation::free(rem));
-                }
-                Some(())
-            } else {
-                None
-            }
-        } else {
-            if entry.length - diff >= size {
-                let rest = entry.length - diff;
-                entry.length = diff;
-                let rem = rest - size;
-                self.data.insert(addr, MemoryAllocation::allocated(size));
-                if rem > 0 {
-                    self.data.insert(addr + size, MemoryAllocation::free(rem));
-                }
-                Some(())
-            } else {
-                None
-            }
-        }
+    pub fn allocate(&mut self, size: PageCount) -> Option<VirtAddrPageAligned> {
+        self.allocate_at(VirtAddrPageAligned::zero(), size, true)
     }
     
-    pub fn deallocate(&mut self, start: VirtAddrPageAligned, size: PageCount) {
-        // TODO: callback for physical memory deallocation
+    pub fn deallocate(&mut self, start: VirtAddrPageAligned, size: PageCount,
+                      mut free_callback: impl FnMut(VirtAddrPageAligned, PageCount)) {
         let selection = BaseWithLength(start, size);
         println!("deallocating {:x?} +{:x?}", start, size);
-        let end = selection.end();
-        let mut cur = self.data.lower_bound_mut(Bound::Unbounded);
+        let mut cur = self.data.upper_bound_mut(Bound::Included(&start));
+        cur.prev();
         while let Some((&base, &mut alloc)) = cur.next() {
             if !alloc.allocated {
                 continue;
             }
-            let entry_end = base + alloc.length;
-            if entry_end <= start {
+            if base + alloc.length <= start {
                 continue;
             }
-            if base >= end {
+            if base >= selection.end() {
                 break;
             }
             let entry = BaseWithLength(base, alloc.length);
@@ -168,22 +163,26 @@ impl VirtualMemorySpace {
                 AddrIntersection::All => {
                     cur.remove_prev().unwrap();
                     insert_entry(&mut cur, entry.start(), MemoryAllocation::free(entry.length()));
+                    free_callback(entry.start(), entry.length());
                 },
                 AddrIntersection::PartialMid(sel) => {
                     cur.remove_prev().unwrap();
                     insert_entry(&mut cur, entry.start(), MemoryAllocation::allocated(sel.start() - entry.start()));
                     insert_entry(&mut cur, sel.start(), MemoryAllocation::free(sel.length()));
                     insert_entry(&mut cur, sel.end(), MemoryAllocation::allocated(entry.end() - sel.end()));
+                    free_callback(sel.start(), sel.length());
                 },
                 AddrIntersection::PartialUp(sel_start) => {
                     cur.remove_prev().unwrap();
                     insert_entry(&mut cur, entry.start(), MemoryAllocation::allocated(sel_start - entry.start()));
                     insert_entry(&mut cur, sel_start, MemoryAllocation::free(entry.end() - sel_start));
+                    free_callback(sel_start, entry.end() - sel_start);
                 },
                 AddrIntersection::PartialDown(sel_end) => {
                     cur.remove_prev().unwrap();
                     insert_entry(&mut cur, entry.start(), MemoryAllocation::free(sel_end - entry.start()));
                     insert_entry(&mut cur, sel_end, MemoryAllocation::allocated(entry.end() - sel_end));
+                    free_callback(entry.start(), sel_end - entry.start());
                 },
             }
         }

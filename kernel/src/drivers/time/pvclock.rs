@@ -21,7 +21,7 @@ static TIME_INFO: AtomicPtr<TimeInfo> = AtomicPtr::new(core::ptr::null_mut());
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 pub fn init() {
-    if unsafe { __cpuid(CPUID_LEAF) }.eax & (1 << 3) == 0 {
+    if __cpuid(CPUID_LEAF).eax & (1 << 3) == 0 {
         return;
     }
     if INITIALIZED.swap(true, Ordering::Relaxed) {

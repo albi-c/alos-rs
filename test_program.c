@@ -14,8 +14,36 @@ long exit(int status) {
     return syscall(2, status, 0, 0, 0, 0, 0);
 }
 
+void* mmap(void* addr, unsigned long length, int prot, int flags, int file, long offset) {
+    return (void*) syscall(3, (unsigned long) addr, length, prot, flags, file, offset);
+}
+
+long munmap(void* addr, unsigned long length) {
+    return syscall(4, (unsigned long) addr, length, 0, 0, 0, 0);
+}
+
 void _start() {
-    syscall(0, 1, 2, 3, 4, 5, 6);
     write(1, "Hello, world!\n", 14);
+    const int SIZE = 0x100;
+    int* buf = (int*) mmap((void*)0x32000, SIZE + 0x4000, 0x1, 0x1, 0, 0);
+    syscall(0, 1, 2, 3, 4, 5, (unsigned long) buf);
+    int count = SIZE / sizeof(int);
+    for (int i = 0; i < count; i++) {
+        buf[i] = i + 1;
+    }
+    for (int i = 0; i < count; i++) {
+        if ((i % 0x10) == 0) {
+            write(1, "\n", 1);
+        }
+        char ibuf[4];
+        ibuf[0] = buf[i] / 100 % 10 + '0';
+        ibuf[1] = buf[i] / 10 % 10 + '0';
+        ibuf[2] = buf[i] % 10 + '0';
+        ibuf[3] = '\t';
+        write(1, ibuf, 4);
+    }
+    write(1, "\n", 1);
+    munmap(buf + 3 * (0x1000 / sizeof(int)), SIZE);
+    *buf = 0;
     exit(0);
 }

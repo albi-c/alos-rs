@@ -28,7 +28,11 @@ impl<const N: usize> Default for SlabAllocator<N> {
 
 impl<const N: usize> SlabAllocator<N> {
     pub const fn new() -> Self {
-        const { assert!(N >= size_of::<SlabNode>()) };
+        const {
+            assert!(N >= size_of::<SlabNode>());
+            assert!(N <= address::PAGE_SIZE);
+            assert!(address::PAGE_SIZE % N == 0);
+        }
         SlabAllocator { node: Cell::new(core::ptr::null_mut()) }
     }
 
@@ -44,11 +48,12 @@ impl<const N: usize> SlabAllocator<N> {
             let data = unsafe { core::slice::from_raw_parts_mut(addr, address::PAGE_SIZE) };
             let (chunks, rest) = data.as_chunks_mut::<N>();
             assert_eq!(rest.len(), 0);
+            assert!(chunks.len() > 0);
             for chunk in chunks {
                 self.deallocate(NonNull::from(chunk).cast());
             }
             let node = unsafe { self.node.get().as_mut() }
-                .expect("SlabAllocator::allocate: No memory was allocated");
+                .expect("SlabAllocator::allocate: deallocate did not put chunk into linked list");
             self.node.set(node.next);
             NonNull::from(node).cast()
         }

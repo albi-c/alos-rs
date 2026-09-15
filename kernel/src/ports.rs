@@ -50,12 +50,12 @@ impl Port {
 
     fn try_alloc(start: u16, length: u16, map: &mut PortMap) -> bool {
         for i in start..(start + length) {
-            if map[(i >> 3) as usize] & (i as u8 & 0x7) != 0 {
+            if map[(i >> 3) as usize] & (1 << (i & 0x7)) != 0 {
                 return false;
             }
         }
         for i in start..(start + length) {
-            map[(i >> 3) as usize] |= i as u8 & 0x7;
+            map[(i >> 3) as usize] |= 1 << (i & 0x7);
         }
         true
     }
@@ -85,6 +85,7 @@ impl Port {
         }
     }
     pub fn in_b(&self, offset: u16) -> u8 {
+        assert!(offset < self.length);
         let value: u8;
         unsafe {
             asm!(
@@ -97,6 +98,7 @@ impl Port {
     }
 
     pub fn out_w(&self, offset: u16, value: u16) {
+        assert!(offset + 1 < self.length);
         unsafe {
             asm!(
                 "out dx, ax",
@@ -106,6 +108,7 @@ impl Port {
         }
     }
     pub fn in_w(&self, offset: u16) -> u16 {
+        assert!(offset + 1 < self.length);
         let value: u16;
         unsafe {
             asm!(
@@ -118,6 +121,7 @@ impl Port {
     }
 
     pub fn out_d(&self, offset: u16, value: u32) {
+        assert!(offset + 3 < self.length);
         unsafe {
             asm!(
                 "out dx, eax",
@@ -127,6 +131,7 @@ impl Port {
         }
     }
     pub fn in_d(&self, offset: u16) -> u32 {
+        assert!(offset + 3 < self.length);
         let value: u32;
         unsafe {
             asm!(
@@ -139,6 +144,7 @@ impl Port {
     }
 
     pub fn out_q(&self, offset: u16, value: u64) {
+        assert!(offset + 7 < self.length);
         unsafe {
             asm!(
                 "out dx, rax",
@@ -148,6 +154,7 @@ impl Port {
         }
     }
     pub fn in_q(&self, offset: u16) -> u64 {
+        assert!(offset + 7 < self.length);
         let value: u64;
         unsafe {
             asm!(

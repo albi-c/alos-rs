@@ -177,6 +177,11 @@ macro_rules! addr_cmp {
                 self.partial_cmp(&other.0)
             }
         }
+        impl $addr {
+            pub const fn zero() -> Self {
+                Self(0)
+            }
+        }
     };
 }
 
@@ -185,7 +190,7 @@ macro_rules! addr_page_count_diff {
         impl Sub<$addr> for $addr {
             type Output = PageCount;
             fn sub(self, rhs: $addr) -> Self::Output {
-                PageCount(self.0 - rhs.0)
+                PageCount(page_count_down(self.0 - rhs.0))
             }
         }
     };
@@ -515,3 +520,8 @@ pub fn large_page_count_down(addr: usize) -> usize {
     addr >> LARGE_PAGE_SHIFT
 }
 
+pub fn align_page_range(addr: usize, length: usize) -> (VirtAddrPageAligned, PageCount) {
+    let virt = VirtAddr::new(addr).page_align_down();
+    let count = PageCount::pages_up(length + (addr - virt.addr()));
+    (virt, count)
+}

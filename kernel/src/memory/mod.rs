@@ -140,18 +140,26 @@ impl MemorySpace {
     pub fn virt_alloc(&self, count: PageCount) -> VirtAddrPageAligned {
         self.virt_kernel.write().allocate(count).expect("out of virtual memory")
     }
-    pub fn virt_dealloc(&self, addr: VirtAddrPageAligned, count: PageCount) {
-        self.virt_kernel.write().deallocate(addr, count)
+    pub fn virt_dealloc(&self, addr: VirtAddrPageAligned, count: PageCount,
+                        free_callback: impl FnMut(VirtAddrPageAligned, PageCount)) {
+        self.virt_kernel.write().deallocate(addr, count, free_callback);
     }
 
     pub fn user_virt_alloc(&self, count: PageCount) -> Option<VirtAddrPageAligned> {
         self.virt_user.as_ref().expect("no user memory space").write().allocate(count)
     }
     pub fn user_virt_alloc_at(&self, addr: VirtAddrPageAligned, count: PageCount) -> Option<()> {
-        self.virt_user.as_ref().expect("no user memory space").write().allocate_at(addr, count)
+        self.virt_user.as_ref().expect("no user memory space").write()
+            .allocate_at(addr, count, false).map(|_| ())
     }
-    pub fn user_virt_dealloc(&self, addr: VirtAddrPageAligned, count: PageCount) {
-        self.virt_user.as_ref().expect("no user memory space").write().deallocate(addr, count)
+    pub fn user_virt_alloc_at_or_after(&self, addr: VirtAddrPageAligned, count: PageCount) -> Option<VirtAddrPageAligned> {
+        self.virt_user.as_ref().expect("no user memory space").write()
+            .allocate_at(addr, count, true)
+    }
+    pub fn user_virt_dealloc(&self, addr: VirtAddrPageAligned, count: PageCount,
+                             free_callback: impl FnMut(VirtAddrPageAligned, PageCount)) {
+        self.virt_user.as_ref().expect("no user memory space").write()
+            .deallocate(addr, count, free_callback);
     }
 
     #[inline(always)]
@@ -188,7 +196,9 @@ impl MemorySpace {
     }
     pub fn map_flag_func(&self, phys: PhysAddrPageAligned, virt: VirtAddrPageAligned,
                          count: PageCount, mut flags: impl FnMut(usize) -> MemoryFlags) {
-        assert!(count > 0);
+        if count == 0 {
+            return;
+        }
         let mut map_lock = self.phys.map();
         let mut it = map_lock.iterate(
             virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap().into()) });
@@ -197,17 +207,24 @@ impl MemorySpace {
             *me = MapEntry::new_with_flags((phys + PageCount::new(i)).addr(), flags(i).0).present();
         }
     }
-    pub fn unmap(&self, virt: VirtAddrPageAligned, count: PageCount) {
-        assert!(count > 0);
+    pub fn unmap(&self, virt: VirtAddrPageAligned, count: PageCount,
+                 mut callback: impl FnMut(VirtAddrPageAligned, PhysAddrPageAligned)) {
         println!("unmapping {:#x?}..{:#x?}", virt.addr(), (virt + count).addr());
+        if count == 0 {
+            return;
+        }
         let mut map_lock = self.phys.map();
         map_lock.iter_present_in_range(virt, virt + count, |entry, addr| {
             println!("unmapping Page({:#x?}) @ {:#x?}", entry.addr(), addr.addr());
+            callback(addr, entry.addr_wrapped());
+            *entry = entry.with_flags(0).not_present();
         });
     }
     pub fn protect(&self, virt: VirtAddrPageAligned, count: PageCount, flags: MemoryFlags) {
-        assert!(count > 0);
         println!("protecting {:#x?}..{:#x?} as {:#x?}", virt.addr(), (virt + count).addr(), flags.0);
+        if count == 0 {
+            return;
+        }
         let mut map_lock = self.phys.map();
         map_lock.iter_present_in_range(virt, virt + count, |entry, addr| {
             println!("protecting Page({:#x?} -> {:#x?}) @ {:#x?}", entry.0, entry.with_flags(flags.0).present().0, addr.addr());

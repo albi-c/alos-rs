@@ -1,7 +1,8 @@
 use core::arch::global_asm;
 use crate::cpu::{msr_read, msr_write};
 use crate::{print, print_char_n, println};
-use crate::memory::address::UserVirtAddr;
+use crate::memory::address::{align_page_range, PageCount, UserVirtAddr, VirtAddrPageAligned};
+use crate::memory::{MemoryFlags, MemorySpace};
 use crate::task::sched_exit;
 
 const MSR_EFER: u32 = 0xc0000080;
@@ -17,7 +18,7 @@ unsafe extern "C" {
 }
 
 #[unsafe(no_mangle)]
-static mut SYSCALL_TABLE: [u64; 3] = [0; _];
+static mut SYSCALL_TABLE: [u64; 5] = [0; _];
 #[unsafe(no_mangle)]
 #[expect(static_mut_refs)]
 static SYSCALL_TABLE_LENGTH: usize = unsafe { SYSCALL_TABLE.len() };
@@ -59,6 +60,37 @@ extern "C" fn syscall_exit(code: i32) -> ! {
     sched_exit()
 }
 
+extern "C" fn syscall_mmap(req_virt: usize, length: usize, prot: u32, flags: u32, file: i32, offset: isize) -> isize {
+    let (req_virt, page_count) = align_page_range(req_virt, length);
+    let mem_space = MemorySpace::get();
+    let virt = mem_space.user_virt_alloc_at_or_after(req_virt, page_count);
+    let Some(virt) = virt else {
+        println!("[syscall: mmap] failed to allocate virtual memory");
+        return -1;
+    };
+    let phys = mem_space.user_phys_alloc(page_count);
+    let Some(phys) = phys else {
+        println!("[syscall: mmap] failed to allocate physical memory");
+        mem_space.user_virt_dealloc(virt, page_count, |_, _| ());
+        return -1;
+    };
+    mem_space.map(phys, virt, page_count, MemoryFlags::USER | MemoryFlags::WRITE);
+
+    virt.addr() as isize
+}
+
+extern "C" fn syscall_munmap(addr: usize, length: usize) -> isize {
+    let (virt, page_count) = align_page_range(addr, length);
+    let mem_space = MemorySpace::get();
+    mem_space.user_virt_dealloc(virt, page_count, |start_page, count| {
+        mem_space.unmap(start_page, count, |_virt, phys| {
+            mem_space.user_phys_dealloc(phys, PageCount::new(1));
+        });
+    });
+
+    0
+}
+
 macro_rules! syscall {
     ($n:literal, $f:ident) => {
         unsafe { SYSCALL_TABLE[$n] = $f as *const () as u64 };
@@ -69,6 +101,8 @@ pub fn init() {
     syscall!(0, syscall_debug);
     syscall!(1, syscall_write);
     syscall!(2, syscall_exit);
+    syscall!(3, syscall_mmap);
+    syscall!(4, syscall_munmap);
 
     msr_write(MSR_STAR, ((0x10 | 0x3) << 48) | (0x8 << 32));
     msr_write(MSR_LSTAR, _syscall_entry as *const () as u64);

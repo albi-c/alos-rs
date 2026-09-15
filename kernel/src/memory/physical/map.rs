@@ -1,7 +1,7 @@
 use core::arch::asm;
 use crate::memory::hhdm;
 use crate::{print, println};
-use crate::memory::address::{PageCount, VirtAddrPageAligned};
+use crate::memory::address::{PageCount, PhysAddrPageAligned, VirtAddrPageAligned};
 
 #[derive(Debug, Copy, Clone)]
 pub struct MapEntry(pub u64);
@@ -58,6 +58,11 @@ impl MapEntry {
         (self.0 & Self::MASK_ADDR) as usize
     }
     #[inline(always)]
+    pub fn addr_wrapped(self) -> PhysAddrPageAligned {
+        PhysAddrPageAligned::new(self.addr())
+            .expect("MapEntry::addr_wrapped: self.addr() returned address that is not page aligned")
+    }
+    #[inline(always)]
     pub fn flags(self) -> u64 {
         self.0 & Self::MASK_FLAGS
     }
@@ -78,6 +83,10 @@ impl MapEntry {
     #[inline(always)]
     pub fn present(self) -> Self {
         MapEntry(self.0 | Self::FLAG_PRESENT)
+    }
+    #[inline(always)]
+    pub fn not_present(self) -> Self {
+        MapEntry(self.0 & !Self::FLAG_PRESENT)
     }
     #[inline(always)]
     pub fn is_present(self) -> bool {
