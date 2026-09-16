@@ -522,6 +522,6 @@ pub fn large_page_count_down(addr: usize) -> usize {
 
 pub fn align_page_range(addr: usize, length: usize) -> (VirtAddrPageAligned, PageCount) {
     let virt = VirtAddr::new(addr).page_align_down();
-    let count = PageCount::pages_up(length + (addr - virt.addr()));
+    let count = PageCount::pages_up(length.saturating_add(addr - virt.addr()));
     (virt, count)
 }
