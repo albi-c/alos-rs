@@ -186,7 +186,5 @@ impl VirtualMemorySpace {
                 },
             }
         }
-
-        println!("{:#x?}", self.data);
     }
 }

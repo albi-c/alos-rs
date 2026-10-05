@@ -4,6 +4,7 @@ long syscall(unsigned int n, unsigned long p1, unsigned long p2, unsigned long p
     register unsigned long r8 asm("r8") = p5;
     register unsigned long r9 asm("r9") = p6;
     asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(p1), "S"(p2), "d"(p3), "r"(r10), "r"(r8), "r"(r9) : "rcx");
+    return ret;
 }
 
 long write(int fd, const void *buf, unsigned long count) {

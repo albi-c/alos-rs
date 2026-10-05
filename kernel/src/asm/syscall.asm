@@ -12,7 +12,6 @@ _syscall_entry:
 	mov gs:[24], rsp
 	mov rsp, gs:[16]
 
-	pushfq
 	push rcx
 	push r11
 	push r12
@@ -47,7 +46,6 @@ _syscall_entry:
 	xor edi, edi
 	xor edx, edx
 	pop rcx
-	popfq
 
 	mov rsp, gs:[24]
 	swapgs
