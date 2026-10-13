@@ -1,4 +1,5 @@
 use alloc::collections::LinkedList;
+use core::ptr::NonNull;
 use modular_bitfield::prelude::*;
 use crate::{debug, logger, volatile_struct};
 use crate::lock::Lock;
@@ -49,6 +50,36 @@ pub struct DeviceCommand {
     _reserved2: B5,
 }
 
+#[derive(Debug)]
+pub struct DeviceCapabilityVendorSpecific(u16, NonNull<()>);
+
+impl DeviceCapabilityVendorSpecific {
+    pub fn extension(&self) -> u16 {
+        self.0
+    }
+
+    pub fn data_ptr(&self) -> NonNull<()> {
+        self.1
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct DeviceCapabilityPciExpress {
+    pub capabilities: u32,
+}
+
+#[derive(Debug)]
+pub enum DeviceCapability {
+    VendorSpecific(DeviceCapabilityVendorSpecific),
+    PciExpress(DeviceCapabilityPciExpress),
+    Unknown {
+        id: u8,
+        extension: u16,
+        offset: u16,
+    }
+}
+
 volatile_struct! { DeviceHeader;
     vendor: u16,
     device: u16,
@@ -73,6 +104,50 @@ impl DeviceHeader {
             0x1 => DeviceHeaderData::BridgePci,
             0x2 => DeviceHeaderData::BridgeCardBus,
             _ => panic!("Invalid PCI device header type: {:#x}", header_type),
+        }
+    }
+
+    pub fn capabilities(&mut self) -> impl Iterator<Item = DeviceCapability> {
+        struct CapabilityIterator<'a> {
+            header: &'a DeviceHeader,
+            next: u16,
+        }
+
+        impl<'a> Iterator for CapabilityIterator<'a> {
+            type Item = DeviceCapability;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.next == 0 {
+                    None
+                } else {
+                    let offset = self.next;
+                    let ptr = unsafe { NonNull::from(self.header)
+                        .byte_add(self.next as usize).cast::<u32>() };
+                    let cap = unsafe { ptr.read() };
+                    let id = cap as u8;
+                    self.next = ((cap >> 8) & 0xff) as u16;
+                    let extension = (cap >> 16) as u16;
+                    let data_ptr = unsafe { ptr.byte_add(4) };
+                    Some(match id {
+                        0x09 => DeviceCapability::VendorSpecific(
+                            DeviceCapabilityVendorSpecific(extension, data_ptr.cast())),
+                        0x10 => DeviceCapability::PciExpress(unsafe { data_ptr.cast().read() }),
+                        _ => DeviceCapability::Unknown {
+                            id,
+                            extension,
+                            offset,
+                        },
+                    })
+                }
+            }
+        }
+
+        CapabilityIterator {
+            next: match self.data() {
+                DeviceHeaderData::General(data) => data.capabilities.load() as u16,
+                _ => 0,
+            },
+            header: self,
         }
     }
 }

@@ -19,7 +19,8 @@ $(call USER_VARIABLE,QEMUFLAGS,-m 2G -serial mon:stdio -nographic)
 CPU_OPTS = -enable-kvm -cpu host,migratable=no,+invtsc,+ssse3,+sse4.1,+sse4.2,+avx,+xsave,enforce
 #CPU_OPTS =
 
-CPU_OPTS += -drive file=test_program.elf,if=none,id=nvm -device nvme,serial=deadbeef,drive=nvm
+# CPU_OPTS += -drive file=test_program.elf,if=none,id=nvm -device nvme,serial=deadbeef,drive=nvm
+CPU_OPTS += -drive file=test_program.elf,if=none,id=virtio -device virtio-blk,drive=virtio
 
 override IMAGE_NAME := alos-$(KARCH)
 

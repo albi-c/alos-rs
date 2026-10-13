@@ -25,6 +25,7 @@ dependencies = [
  "elf",
  "elf_loader",
  "limine",
+ "log",
  "macros",
  "modular-bitfield",
  "paste",
