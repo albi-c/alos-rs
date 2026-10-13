@@ -7,6 +7,7 @@
 #![feature(slice_from_ptr_range)]
 #![feature(abi_x86_interrupt)]
 #![feature(step_trait)]
+#![feature(linked_list_cursors)]
 extern crate alloc;
 
 mod drivers;
@@ -25,6 +26,7 @@ mod task;
 mod core_local;
 mod syscall;
 mod elf_loader;
+mod pcie;
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -114,6 +116,9 @@ unsafe extern "C" fn kmain() -> ! {
     // call on all cores when SMP is added
     memory::init_core_local(memory_values);
     gdt::init_core_local();
+
+    let acpi_tables = acpi::init();
+    pcie::init(&acpi_tables);
 
     syscall::init();
 

@@ -53,3 +53,13 @@ pub unsafe fn as_ref<T>(addr: usize) -> &'static T {
 pub unsafe fn as_mut_ref<T>(addr: usize) -> &'static mut T {
     unsafe { &mut *as_ptr(addr) }
 }
+
+#[inline(always)]
+pub unsafe fn as_slice<T>(addr: usize, len: usize) -> &'static [T] {
+    unsafe { core::slice::from_raw_parts(addr as *const T, len) }
+}
+
+#[inline(always)]
+pub unsafe fn as_mut_slice<T>(addr: usize, len: usize) -> &'static mut [T] {
+    unsafe { core::slice::from_raw_parts_mut(addr as *mut T, len) }
+}

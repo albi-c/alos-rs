@@ -2,6 +2,7 @@ use crate::{linker_set_declare, linker_set_slice_mut};
 
 pub mod serial;
 pub(crate) mod time;
+mod storage;
 
 #[derive(Debug)]
 pub struct Driver {

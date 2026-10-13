@@ -10,11 +10,16 @@ $(call USER_VARIABLE,KARCH,x86_64)
 
 # Default user QEMU flags. These are appended to the QEMU command calls.
 $(call USER_VARIABLE,QEMUFLAGS,-m 2G -serial mon:stdio -nographic)
+# $(call USER_VARIABLE,QEMUFLAGS,-m 2G)
 #$(call USER_VARIABLE,QEMUFLAGS,-m 2G -d cpu_reset,int)
 #$(call USER_VARIABLE,QEMUFLAGS,-m 2G -d int -no-reboot -no-shutdown)
 
+# QEMUFLAGS += -drive file=test_program.elf,if=none,id=nvm -device nvme,serial=deadbeef,drive=nvm
+
 CPU_OPTS = -enable-kvm -cpu host,migratable=no,+invtsc,+ssse3,+sse4.1,+sse4.2,+avx,+xsave,enforce
 #CPU_OPTS =
+
+CPU_OPTS += -drive file=test_program.elf,if=none,id=nvm -device nvme,serial=deadbeef,drive=nvm
 
 override IMAGE_NAME := alos-$(KARCH)
 

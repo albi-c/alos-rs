@@ -10,12 +10,18 @@ use crate::ports::Port;
 #[unsafe(link_section = ".requests")]
 static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
 
-pub fn init() {
+pub fn init() -> Tables {
     let response = RSDP_REQUEST.get_response().expect("No RSDP address");
     let tables = unsafe {
         AcpiTables::from_rsdp(MemoryHandler, response.address()) }.expect("Invalid ACPI tables");
-    let pci_conf = PciConfigRegions::new(&tables).expect("No PCI config regions");
-    for region in pci_conf.regions {
+    Tables(tables)
+}
+
+pub struct Tables(AcpiTables<MemoryHandler>);
+
+impl Tables {
+    pub fn get_pci_regions(&self) -> Option<PciConfigRegions> {
+        PciConfigRegions::new(&self.0).ok()
     }
 }
 

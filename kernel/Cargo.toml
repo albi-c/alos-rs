@@ -26,3 +26,4 @@ acpi = "6.0.1"
 elf = { version = "0.8.0", default-features = false, features = ["alloc"] }
 elf_loader = { version = "0.17.0", default-features = false, features = [] }
 bytemuck = "1.25.2"
+modular-bitfield = "0.13.1"
