@@ -202,7 +202,10 @@ impl MemorySpace {
         }
         let mut map_lock = self.phys.map();
         let mut it = map_lock.iterate(
-            virt, || unsafe { hhdm::as_mut_ref(alloc_page().unwrap().into()) });
+            virt, || unsafe {
+                let page = alloc_page().expect("out of memory");
+                hhdm::as_mut_ref(page.addr())
+            });
         for i in 0..count.count() {
             let me = it.next();
             *me = MapEntry::new_with_flags((phys + PageCount::new(i)).addr(), flags(i).0).present();

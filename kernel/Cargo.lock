@@ -22,7 +22,17 @@ version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e61f2b7f93d2c7d2b08263acaa4a363b3e276806c68af6134c44f523bf1aacd"
 dependencies = [
- "gimli",
+ "gimli 0.25.0",
+ "rustc-demangle",
+]
+
+[[package]]
+name = "addr2line"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e567177890eb1617b1f774005b66b26b2377afd138a2ca37aae7d8f0c81429d4"
+dependencies = [
+ "gimli 0.34.0",
  "rustc-demangle",
 ]
 
@@ -31,10 +41,12 @@ name = "alos"
 version = "0.1.0"
 dependencies = [
  "acpi",
+ "addr2line 0.27.1",
  "backtracer_core",
  "bitflags 2.13.2",
  "bytemuck",
  "elf",
+ "gimli 0.34.0",
  "limine",
  "macros",
  "modular-bitfield",
@@ -54,9 +66,9 @@ version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0dad6e6def79d45294d64988845a381bf8856407ff83a00be491300afae250e4"
 dependencies = [
- "addr2line",
+ "addr2line 0.16.0",
  "cfg-if",
- "gimli",
+ "gimli 0.25.0",
  "log",
  "stable_deref_trait",
  "x86",
@@ -129,6 +141,12 @@ checksum = "f0a01e0497841a3b2db4f8afa483cce65f7e96a3498bd6c541734792aeac8fe7"
 dependencies = [
  "stable_deref_trait",
 ]
+
+[[package]]
+name = "gimli"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
 
 [[package]]
 name = "limine"
