@@ -31,7 +31,8 @@ endif
 # Default target.
 .PHONY: all
 all:
-	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE)
+# 	RUSTFLAGS="-C relocation-model=static" cargo +nightly build --target $(RUST_TARGET) --profile $(RUST_PROFILE)
+	RUSTFLAGS="-C relocation-model=static -Cforce-unwind-tables -Cforce-frame-pointers" cargo +nightly build --target $(RUST_TARGET) --profile $(RUST_PROFILE) -Z build-std=panic_abort,core,alloc
 	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/$$(cd target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR) && find -maxdepth 1 -perm -111 -type f) kernel
 
 # Remove object files and the final executable.

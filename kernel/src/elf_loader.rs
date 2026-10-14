@@ -2,7 +2,6 @@ use elf::ElfBytes;
 use elf::endian::NativeEndian;
 use crate::memory::{MemoryFlags, MemorySpace};
 use crate::memory::address::{align_page_range, VirtAddr};
-use crate::println;
 
 pub enum ElfError {
     Lib(elf::ParseError),
@@ -66,7 +65,6 @@ pub fn load_elf(data: &[u8]) -> Result<usize, ElfError> {
         if let Some((virt_addr, pages, flags)) = protect {
             MemorySpace::get().protect(virt_addr, pages, flags);
         }
-        println!("{:x?} @{:x?}", program, addr);
     }
 
     Ok(file.ehdr.e_entry as usize)

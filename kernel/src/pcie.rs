@@ -3,7 +3,8 @@ use core::ptr::NonNull;
 use modular_bitfield::prelude::*;
 use crate::{debug, logger, volatile_struct};
 use crate::lock::Lock;
-use crate::memory::address::{PageCount, PhysAddr, VirtAddrPageAligned};
+use crate::memory::address::{PageCount, PhysAddr, PhysAddrPageAligned, VirtAddrPageAligned};
+use crate::memory::mmio::MMIO;
 
 logger!("PCIe");
 
@@ -20,9 +21,32 @@ volatile_struct! { DeviceHeaderDataGeneral;
 
 impl DeviceHeaderDataGeneral {
     pub fn get_bar64(&self, index: usize) -> u64 {
-        assert!(index < 5, "bar index out of bounds");
+        assert!(index < 5, "pcie: BAR index out of bounds");
         let bar = self.bar.load();
         bar[index] as u64 | ((bar[index + 1] as u64) << 32)
+    }
+
+    pub fn map_bar(&self, index: usize, offset: PageCount, size: PageCount, writable: bool) -> MMIO {
+        assert!(index < 6, "pcie: BAR index out of bounds");
+        let bar = self.bar.load();
+        let lo = bar[index];
+        assert_eq!(lo & 0x1, 0, "pcie: cannot map IO BAR as memory");
+        let prefetchable = lo & 0x8 != 0;
+        let write_through = prefetchable && writable;
+        match (lo >> 1) & 0x3 {
+            0x0 => unsafe { MMIO::new(PhysAddrPageAligned::new((lo & !0xf) as usize)
+                                          .expect("pcie: BAR is not page aligned") + offset,
+                                      size, writable, write_through) },
+            0x2 => {
+                assert!(index < 5, "pcie: 64 bit BAR index out of bounds");
+                let hi = bar[index + 1];
+                let addr = ((lo & !0xf) as usize) | ((hi as usize) << 32);
+                unsafe { MMIO::new(PhysAddrPageAligned::new(addr)
+                                       .expect("pcie: BAR is not page aligned") + offset,
+                                   size, writable, write_through) }
+            },
+            _ => panic!("pcie: unknown memory BAR type - {:#x}", (lo >> 1) & 0x3),
+        }
     }
 }
 
@@ -175,7 +199,7 @@ fn device_header(base: VirtAddrPageAligned, bus: u8, device: u8, function: u8) -
 }
 
 fn visit_function(devices: &mut LinkedList<Device>, header: &'static mut DeviceHeader) {
-    debug!("found device - vendor: 0x{:04x}, device: 0x{:04x}, class: {:#x}, subclass: {:#x}, prog_if: {:#x}",
+    debug!("Found device - vendor: 0x{:04x}, device: 0x{:04x}, class: {:#x}, subclass: {:#x}, prog_if: {:#x}",
         header.vendor.load(), header.device.load(), header.class.load(), header.subclass.load(), header.prog_if.load());
 
     devices.push_back(Device {

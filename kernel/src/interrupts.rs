@@ -64,6 +64,7 @@ type AsmHandler = unsafe extern "C" fn() -> ();
 pub struct IrqContext {
     pub irq: u16,
     pub flags: u64,
+    pub sp: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +75,8 @@ pub struct ExcContext {
     pub instruction: u64,
     pub user: bool,
     pub flags: u64,
+    pub sp: u64,
+    pub bp: u64,
 }
 
 pub type IrqHandler = fn(IrqContext) -> ();
@@ -112,6 +115,7 @@ pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u16) {
     let ctx = IrqContext {
         irq,
         flags: frame.flags,
+        sp: frame.sp,
     };
     (unsafe { core::mem::transmute::<_, IrqHandler>(HANDLERS[irq as usize]) })(ctx);
     if user {
@@ -120,6 +124,8 @@ pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u16) {
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn exc_handler(frame: &InterruptStackFrame, exc: u16, error_code: u64) {
+    let rbp: u64;
+    unsafe { asm!("mov {0}, rbp", out(reg) rbp) };
     let cr2: u64;
     unsafe { asm!("mov {0}, cr2", "mov cr2, {1}", out(reg) cr2, in(reg) 0u64) };
     let user = frame.cs == USER_CS;
@@ -133,6 +139,8 @@ pub extern "C" fn exc_handler(frame: &InterruptStackFrame, exc: u16, error_code:
         instruction: frame.ip,
         user,
         flags: frame.flags,
+        sp: frame.sp,
+        bp: rbp,
     };
     (unsafe { core::mem::transmute::<_, ExcHandler>(HANDLERS[exc as usize]) })(ctx);
     if user {

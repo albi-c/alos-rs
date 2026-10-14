@@ -1,7 +1,7 @@
 use core::iter::Step;
 use core::ops::{Add, AddAssign, Mul, Shl, Shr, Sub, SubAssign};
 use core::ptr::NonNull;
-use bytemuck::Pod;
+use bytemuck::{Pod, Zeroable};
 use crate::memory::{hhdm, MemorySpace};
 
 pub const PAGE_SHIFT: u8 = 12;
@@ -196,7 +196,7 @@ macro_rules! addr_page_count_diff {
     };
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct PageCount(usize);
 
@@ -219,6 +219,10 @@ impl PageCount {
         self.0 << PAGE_SHIFT
     }
 
+    #[inline(always)]
+    pub fn try_pages(addr: usize) -> Option<PageCount> {
+        is_page_aligned(addr).then_some(PageCount(addr >> PAGE_SHIFT))
+    }
     #[inline(always)]
     pub fn pages_up(addr: usize) -> PageCount {
         PageCount(page_count_up(addr))
@@ -283,7 +287,7 @@ simple_op!(PageCount, Shr, shr);
 addr_to_from_usize!(PageCount);
 addr_cmp!(PageCount);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct PhysAddr(usize);
 
@@ -300,7 +304,7 @@ addr_to_from_usize!(PhysAddr);
 addr_usize_addr!(PhysAddr);
 addr_cmp!(PhysAddr);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct PhysAddrPageAligned(usize);
 
@@ -320,7 +324,7 @@ addr_cmp!(PhysAddrPageAligned);
 addr_page_count_diff!(PhysAddrPageAligned);
 addr_usize_addr!(PhysAddrPageAligned);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct VirtAddr(usize);
 
@@ -381,7 +385,7 @@ impl<T: ?Sized> From<NonNull<T>> for VirtAddr {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct VirtAddrPageAligned(usize);
 
@@ -442,7 +446,7 @@ impl<T: ?Sized> TryFrom<NonNull<T>> for VirtAddrPageAligned {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Pod, Zeroable)]
 #[repr(transparent)]
 pub struct UserVirtAddr(usize);
 

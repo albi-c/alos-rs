@@ -143,7 +143,6 @@ impl VirtualMemorySpace {
     pub fn deallocate(&mut self, start: VirtAddrPageAligned, size: PageCount,
                       mut free_callback: impl FnMut(VirtAddrPageAligned, PageCount)) {
         let selection = BaseWithLength(start, size);
-        println!("deallocating {:x?} +{:x?}", start, size);
         let mut cur = self.data.upper_bound_mut(Bound::Included(&start));
         cur.prev();
         while let Some((&base, &mut alloc)) = cur.next() {
@@ -157,7 +156,6 @@ impl VirtualMemorySpace {
                 break;
             }
             let entry = BaseWithLength(base, alloc.length);
-            println!("deallocate {:x?} +{:x?} {:x?}", base, alloc.length, entry.intersect(selection));
             match entry.intersect(selection) {
                 AddrIntersection::None => {},
                 AddrIntersection::All => {

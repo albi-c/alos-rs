@@ -26,3 +26,32 @@ macro_rules! println {
 macro_rules! print_char_n {
     ($ch:expr, $n:expr) => ($crate::print::_print_char_n($ch, $n));
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct ByteSize(pub usize);
+
+impl core::fmt::Display for ByteSize {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", ByteSize64(self.0 as u64))
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ByteSize64(pub u64);
+
+impl core::fmt::Display for ByteSize64 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let ByteSize64(size) = *self;
+        if size < 3 << 10 {
+            write!(f, "{} B", size)
+        } else if size < 3 << 20 {
+            write!(f, "{} kB", size >> 10)
+        } else if size < 3 << 30 {
+            write!(f, "{} MB", size >> 20)
+        } else if size < 3 << 40 {
+            write!(f, "{} GB", size >> 30)
+        } else {
+            write!(f, "{} TB", size >> 40)
+        }
+    }
+}

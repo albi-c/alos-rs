@@ -4,6 +4,7 @@ pub mod hhdm;
 mod space;
 mod virt;
 mod slab;
+pub mod mmio;
 
 use alloc::sync::Arc;
 use core::arch::asm;
@@ -209,25 +210,21 @@ impl MemorySpace {
     }
     pub fn unmap(&self, virt: VirtAddrPageAligned, count: PageCount,
                  mut callback: impl FnMut(VirtAddrPageAligned, PhysAddrPageAligned)) {
-        println!("unmapping {:#x?}..{:#x?}", virt.addr(), (virt + count).addr());
         if count == 0 {
             return;
         }
         let mut map_lock = self.phys.map();
         map_lock.iter_present_in_range(virt, virt + count, |entry, addr| {
-            println!("unmapping Page({:#x?}) @ {:#x?}", entry.addr(), addr.addr());
             callback(addr, entry.addr_wrapped());
             *entry = entry.with_flags(0).not_present();
         });
     }
     pub fn protect(&self, virt: VirtAddrPageAligned, count: PageCount, flags: MemoryFlags) {
-        println!("protecting {:#x?}..{:#x?} as {:#x?}", virt.addr(), (virt + count).addr(), flags.0);
         if count == 0 {
             return;
         }
         let mut map_lock = self.phys.map();
         map_lock.iter_present_in_range(virt, virt + count, |entry, addr| {
-            println!("protecting Page({:#x?} -> {:#x?}) @ {:#x?}", entry.0, entry.with_flags(flags.0).present().0, addr.addr());
             *entry = entry.with_flags(flags.0).present();
         });
     }

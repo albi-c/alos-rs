@@ -36,5 +36,8 @@ macro_rules! volatile_struct {
         pub struct $name {
             $(pub $ident: crate::volatile::Volatile<$ty>,)*
         }
+
+        unsafe impl bytemuck::Zeroable for $name {}
+        unsafe impl bytemuck::Pod for $name {}
     }
 }

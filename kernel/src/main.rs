@@ -2,12 +2,13 @@
 #![no_main]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(negative_impls)]
-#![feature(unsafe_cell_access)]
 #![feature(btree_cursors)]
 #![feature(slice_from_ptr_range)]
 #![feature(abi_x86_interrupt)]
 #![feature(step_trait)]
 #![feature(linked_list_cursors)]
+
+extern crate core;
 extern crate alloc;
 
 mod drivers;
@@ -56,15 +57,39 @@ static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
 logger!("Kernel");
 
+fn handle_backtrace_frame(frame: &backtracer_core::Frame) -> bool {
+    let ip = frame.ip();
+    if (ip as u64) < 0xffffffff00000000 {
+        false
+    } else {
+        error!("  {:#x}", ip as usize);
+        true
+    }
+}
+
+fn print_backtrace() {
+    backtracer_core::trace(handle_backtrace_frame);
+}
+
+fn print_backtrace_from(bp: u64, sp: u64, ip: u64) {
+    backtracer_core::trace_from(
+        backtracer_core::EntryPoint::new(bp, sp, ip + 1), handle_backtrace_frame);
+}
+
 fn exception_handler(ctx: interrupts::ExcContext) {
     if ctx.user {
         warning!("User exception: {:#x?}", ctx);
         panic!("User exception");
     } else {
+        error!("Kernel exception backtrace:");
+        print_backtrace_from(ctx.bp, ctx.sp, ctx.instruction);
         if ctx.exc == 0x8 {
-            error!("Double fault - possible page fault at {:#x}", ctx.address);
+            error!("Double fault - possible page fault at instruction {:#x}", ctx.address);
+            error!("Double fault backtrace:");
+            print_backtrace_from(ctx.bp, ctx.sp, ctx.address);
         }
-        panic!("Kernel exception: {:#x?}", ctx);
+        error!("Kernel exception: {:#x?}", ctx);
+        panic_no_message();
     }
 }
 fn irq_handler(ctx: interrupts::IrqContext) {
@@ -191,12 +216,31 @@ extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
     }
 }
 
+unsafe extern "C" {
+    static __eh_frame_hdr_start: u8;
+    static __eh_frame_hdr_end: u8;
+    static __eh_frame_start: u8;
+    static __eh_frame_end: u8;
+}
+
+fn panic_no_message() -> ! {
+    cpu::hcf()
+}
+
+fn handle_panic(info: &core::panic::PanicInfo) -> ! {
+    error!("Panic backtrace:");
+    print_backtrace();
+
+    if let Some(location) = info.location() {
+        error!("Panic: {} [{}:{}]", info.message(), location.file(), location.line());
+    } else {
+        error!("Panic: {}", info.message());
+    }
+
+    panic_no_message()
+}
+
 #[panic_handler]
 fn rust_panic(info: &core::panic::PanicInfo) -> ! {
-    if let Some(location) = info.location() {
-        error!("Kernel panic: {} [{}:{}]", info.message(), location.file(), location.line());
-    } else {
-        error!("Kernel panic: {}", info.message());
-    }
-    cpu::hcf();
+    handle_panic(info)
 }

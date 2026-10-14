@@ -14,6 +14,7 @@ use crate::memory::{address, alloc_page, alloc_page_zeroed, hhdm};
 use crate::memory::address::{PageCount, PhysAddrPageAligned, VirtAddrPageAligned};
 use crate::memory::physical::allocator::MemoryAllocator;
 use crate::memory::physical::map::{MapEntry, MemoryMap};
+use crate::print::{ByteSize, ByteSize64};
 
 logger!("PMM");
 
@@ -193,7 +194,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
             }
             match entry.entry_type {
                 EntryType::USABLE => {
-                    debug!("Free memory block [{} | {} kB]", entry.base >> 10, entry.length >> 10);
+                    debug!("Free memory block [{} | {}]", ByteSize64(entry.base), ByteSize64(entry.length));
                     if entry.length > largest_entry.map(|e| e.length).unwrap_or(0) {
                         largest_entry = Some(entry);
                     }
@@ -208,7 +209,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
         let largest_entry = largest_entry.expect("No free memory");
         let kernel_entry = kernel_entry.expect("No kernel memory map entry");
 
-        debug!("Memory end: {} kB", memory_end >> 10);
+        debug!("Memory end: {}", ByteSize(memory_end));
 
         self.alloc_32.init(0, min(1 << 32, memory_end));
         self.alloc_main.init(1 << 32, memory_end);
@@ -226,11 +227,11 @@ impl<A: MemoryAllocator> MemoryManager<A> {
                 .expect("Not enough memory for allocator data"));
         }
 
-        debug!("Allocator data: {} kB", early_alloc.used() >> 10);
+        debug!("Allocator data: {}", ByteSize(early_alloc.used()));
 
         let kernel_pages = address::page_count_up(kernel_entry.length as usize) + 10;
-        debug!("Kernel size: {} kB ({} pages)",
-            (kernel_pages << address::PAGE_SHIFT) >> 10, kernel_pages);
+        debug!("Kernel size: {} ({} pages)",
+            ByteSize(kernel_pages << address::PAGE_SHIFT), kernel_pages);
 
         let map = early_alloc.allocate_map();
 
@@ -265,7 +266,7 @@ impl<A: MemoryAllocator> MemoryManager<A> {
             }
         }
 
-        debug!("Free memory: {} kB", free_mem >> 10);
+        debug!("Free memory: {}", ByteSize(free_mem));
 
         self.initialized = true;
         
