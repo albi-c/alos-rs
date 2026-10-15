@@ -1,8 +1,10 @@
+use core::fmt::Debug;
 use core::marker::PhantomData;
 use core::ptr::NonNull;
 use bytemuck::Pod;
 use crate::memory::address::{PageCount, PhysAddrPageAligned, VirtAddrPageAligned};
 use crate::memory::{MemoryFlags, MemorySpace};
+use crate::volatile::Volatile;
 
 #[derive(Debug)]
 pub struct MMIO {
@@ -97,6 +99,10 @@ pub unsafe trait VolatileAccess {
     fn get_slice_mut<T: Pod>(&self, offset: usize, len: usize) -> &mut [T] {
         unsafe { core::slice::from_raw_parts_mut(
             self.get_ptr_at(offset, len * size_of::<T>()).cast().as_ptr(), len) }
+    }
+
+    fn get_volatile<T: Pod + Debug>(&self, offset: usize) -> &mut Volatile<T> {
+        self.get_mut(offset)
     }
 
     fn partition(&self, offset: usize, size: usize) -> MMIOPartition<'_> {

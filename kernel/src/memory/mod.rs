@@ -3,7 +3,7 @@ pub mod address;
 pub mod hhdm;
 mod space;
 mod virt;
-mod slab;
+pub mod slab;
 pub mod mmio;
 
 use alloc::sync::Arc;

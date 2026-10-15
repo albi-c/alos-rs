@@ -164,14 +164,14 @@ pub fn slabs(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 }
             }
 
-            fn allocate(&mut self, size_shift: usize) -> NonNull<u8> {
+            fn allocate(&mut self, size_shift: usize) -> PhysAddr {
                 match size_shift {
                     #(#slab_alloc_match)*
                     _ => panic!("Invalid slab shift: {}", size_shift)
                 }
             }
 
-            fn deallocate(&mut self, size_shift: usize, memory: NonNull<u8>) {
+            fn deallocate(&mut self, size_shift: usize, memory: PhysAddr) {
                 match size_shift {
                     #(#slab_dealloc_match)*
                     _ => panic!("Invalid slab shift: {}", size_shift)

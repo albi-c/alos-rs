@@ -28,5 +28,7 @@ elf = { version = "0.8.0", default-features = false, features = [] }
 bytemuck = { version = "1.25.2", features = ["derive"] }
 modular-bitfield = "0.13.1"
 bitflags = { version = "2.13.2", features = ["bytemuck"] }
-addr2line = { version = "0.27.1", default-features = false, features = ["rustc-demangle"] }
 gimli = { version = "0.34.0", default-features = false, features = ["read"] }
+compact_str = { version = "0.10.0", default-features = false, features = [] }
+uuid = { version = "1.28.0", default-features = false, features = [] }
+twox-hash = { version = "2.1.5", default-features = false, features = ["xxhash3_128"] }

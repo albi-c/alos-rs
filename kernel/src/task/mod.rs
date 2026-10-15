@@ -1,8 +1,6 @@
-use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::collections::btree_map::Entry;
-use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -11,6 +9,7 @@ use core::mem::{offset_of, ManuallyDrop};
 use core::ops::{Index, IndexMut};
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
+use compact_str::CompactString;
 use crate::{core_local, cpu};
 use crate::core_local::core_info;
 use crate::gdt::tss_set_kernel_stack;
@@ -195,7 +194,7 @@ pub fn task_switch(next: usize) {
 }
 
 pub fn init<T: Sized>(func: extern "C" fn(Box<T>) -> !, param: Box<T>) -> ! {
-    let task = Task::new_kernel(Some((func, param)), "init".to_owned());
+    let task = Task::new_kernel(Some((func, param)), CompactString::new("init"));
     let id = task.add_to_tasks(false);
 
     // will be unlocked in _task_switch_continue()
@@ -296,7 +295,7 @@ pub struct Task {
     pub user_stack_size: usize,
 
     pub memory_space: Arc<MemorySpace>,
-    pub name: String,
+    pub name: CompactString,
     pub next: Option<usize>,
     pub files: Vec<FileDescriptor>,
 }
@@ -364,7 +363,7 @@ impl Task {
         assert!(offset_of!(Task, id) == 56);
     }
 
-    pub fn new_kernel<T: Sized>(func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>, name: String) -> Box<Self> {
+    pub fn new_kernel<T: Sized>(func: Option<(extern "C" fn(Box<T>) -> !, Box<T>)>, name: CompactString) -> Box<Self> {
         const { Self::check_struct_offsets() };
 
         let is_idle = func.is_none();
@@ -395,7 +394,7 @@ impl Task {
         })
     }
 
-    pub fn new_user<T: Sized>(func: (extern "C" fn(Box<T>) -> !, Box<T>), name: String,
+    pub fn new_user<T: Sized>(func: (extern "C" fn(Box<T>) -> !, Box<T>), name: CompactString,
                               memory_space: Arc<MemorySpace>, stack_size: usize) -> Box<Self> {
         const { Self::check_struct_offsets() };
 

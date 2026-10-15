@@ -29,13 +29,14 @@ mod syscall;
 mod elf_loader;
 mod pcie;
 mod backtrace;
+mod device;
 
-use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::string::String;
+use compact_str::CompactString;
 use limine::BaseRevision;
 use limine::request::{ExecutableFileRequest, FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 use drivers::time::pit;
+use crate::device::{DeviceTransfer, BLOCK_DEVICE_REGISTRY};
 use crate::drivers::serial;
 use crate::elf_loader::ElfError;
 use crate::memory::MemorySpace;
@@ -127,7 +128,7 @@ unsafe extern "C" fn kmain() -> ! {
 
     drivers::init();
 
-    task::init(kernel_main_task, Box::new("hello, world!".to_owned()));
+    task::init(kernel_main_task, Box::new(CompactString::new("hello, world!")));
 }
 
 extern "C" fn user_start_task(_: Box<()>) -> ! {
@@ -153,20 +154,31 @@ extern "C" fn kernel_side_task(_: Box<()>) -> ! {
     }
 }
 
-extern "C" fn kernel_main_task(msg: Box<String>) -> ! {
+extern "C" fn kernel_main_task(msg: Box<CompactString>) -> ! {
     debug!("Main task entered: {}", msg);
 
     let task = Task::new_kernel(
-        Some((kernel_side_task, Box::new(()))), "side".to_owned());
+        Some((kernel_side_task, Box::new(()))), CompactString::new("side"));
     let id = task.add_to_tasks(true);
     println!("Side task id: {}", id);
     sched_yield();
+
+    debug!("Opening file");
+    let device = BLOCK_DEVICE_REGISTRY.find(|_| true)
+        .expect("kernel: no block device");
+    assert!(device.block_count() > 0, "kernel: block device is empty");
+    assert_eq!(device.block_size(), 512, "kernel: invalid device block size");
+    let transfer = DeviceTransfer::new(512);
+    let (transfer, count) = device.read(0, transfer)
+        .wait()
+        .expect("kernel: failed to read from block device");
+    assert_eq!(count, transfer.size(), "kernel: invalid block device read count");
 
     debug!("Main task continues");
 
     let space = MemorySpace::get().new_new_user();
     let task = Task::new_user(
-        (user_start_task, Box::new(())), "user".to_owned(), space, 1 << 16);
+        (user_start_task, Box::new(())), CompactString::new("user"), space, 1 << 16);
     let id = task.add_to_tasks(true);
     println!("User task id: {}", id);
     sched_yield();
