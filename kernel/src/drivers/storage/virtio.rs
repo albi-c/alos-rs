@@ -279,8 +279,10 @@ fn init() {
 
         debug!("[#{id}] Acquired device id");
 
-        // TODO: crashes when queue size is over 0x400
-        let queue = Queue::new(0x400);
+        // TODO: crashes when queue size is over 0x400,
+        // TODO: does not crash but hangs when queue size is at most 0x400
+        // let queue = Queue::new(0x400);
+        let queue = Queue::from_regs(regs);
 
         let device = BlkDevice::new(
             id, queue, mmio_regs, mmio_storage_regs,
@@ -378,7 +380,7 @@ impl BlockDevice for BlkDevice {
         if count << SECTOR_SHIFT != size {
             return DeviceOperation::new(DeviceResult::err(data, DeviceError::DataSizeUnaligned));
         }
-        if block + (count as usize) >= self.block_count() {
+        if block + (count as usize) > self.block_count() {
             return DeviceOperation::new(DeviceResult::err(data, DeviceError::OutOfBounds));
         }
 
@@ -418,20 +420,29 @@ impl BlockDevice for BlkDevice {
         self.mmio_notification.store(
             (self.regs().queue_notify_off.load() as u32 * self.notify_multiplier) as usize, 0u16);
 
-        loop {
-            let index = self.queue.used_index().load();
-            if index != used_idx {
+        let result = loop {
+            if self.queue.used_index().load() != used_idx {
                 let status = Volatile::from_ref(status).load();
-                debug!("[#{}] Read queue status: {}", self.id, status);
-                break;
+                break match status {
+                    0x0 => Ok(size as usize),
+                    0x1 => Err(DeviceError::DeviceFault),
+                    0x2 => Err(DeviceError::Unsupported),
+                    _ => {
+                        error!("[#{}] unknown operation result status: {:#x}", self.id, status);
+                        Err(DeviceError::DeviceFault)
+                    }
+                };
             }
             sched_yield();
-        }
+        };
 
         SLABS.deallocate_physical_one::<RequestHeader>(phys_header);
         SLABS.deallocate_physical_one::<u8>(phys_status);
 
-        DeviceOperation::new(DeviceResult::ok(data, size as usize))
+        DeviceOperation::new(DeviceResult {
+            data,
+            result,
+        })
     }
 
     fn write(&self, _block: usize, data: DeviceTransfer) -> DeviceOperation {

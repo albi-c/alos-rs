@@ -131,11 +131,10 @@ unsafe extern "C" fn kmain() -> ! {
     task::init(kernel_main_task, Box::new(CompactString::new("hello, world!")));
 }
 
-extern "C" fn user_start_task(_: Box<()>) -> ! {
+extern "C" fn user_start_task(program_data: Box<DeviceTransfer>) -> ! {
     debug!("User start task entered");
 
-    let program_data = include_bytes!("../../test_program.elf");
-    let func_addr = match elf_loader::load_elf(program_data) {
+    let func_addr = match elf_loader::load_elf(program_data.data()) {
         Ok(addr) => addr,
         Err(err) => match err {
             ElfError::Lib(err) => panic!("ELF error: {}", err),
@@ -161,24 +160,23 @@ extern "C" fn kernel_main_task(msg: Box<CompactString>) -> ! {
         Some((kernel_side_task, Box::new(()))), CompactString::new("side"));
     let id = task.add_to_tasks(true);
     println!("Side task id: {}", id);
-    sched_yield();
 
-    debug!("Opening file");
+    debug!("Reading file");
     let device = BLOCK_DEVICE_REGISTRY.find(|_| true)
         .expect("kernel: no block device");
     assert!(device.block_count() > 0, "kernel: block device is empty");
-    assert_eq!(device.block_size(), 512, "kernel: invalid device block size");
-    let transfer = DeviceTransfer::new(512);
+    let transfer = DeviceTransfer::new(device.block_count() << device.block_size_shift());
     let (transfer, count) = device.read(0, transfer)
         .wait()
         .expect("kernel: failed to read from block device");
     assert_eq!(count, transfer.size(), "kernel: invalid block device read count");
+    debug!("File read");
 
     debug!("Main task continues");
 
     let space = MemorySpace::get().new_new_user();
     let task = Task::new_user(
-        (user_start_task, Box::new(())), CompactString::new("user"), space, 1 << 16);
+        (user_start_task, Box::new(transfer)), CompactString::new("user"), space, 1 << 16);
     let id = task.add_to_tasks(true);
     println!("User task id: {}", id);
     sched_yield();
