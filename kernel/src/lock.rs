@@ -1,5 +1,6 @@
 use crate::cpu;
 
+#[derive(Debug)]
 struct InterruptGuard(bool);
 
 impl !Send for InterruptGuard {}
@@ -38,6 +39,7 @@ mod inner {
         }
     }
 
+    #[derive(Debug)]
     pub struct InterruptLockGuard<'a, T: ?Sized> {
         guard: InterruptGuard,
         data: &'a mut T,
@@ -76,6 +78,9 @@ mod inner {
 
         pub unsafe fn force_write_unlock(&self) {}
     }
+
+    pub type LockGuardRead<'a, T> = InterruptLockGuard<'a, T>;
+    pub type LockGuardWrite<'a, T> = InterruptLockGuard<'a, T>;
 }
 
 #[cfg(feature = "smp")]
@@ -162,6 +167,9 @@ mod inner {
             unsafe { self.lock.force_write_unlock() }
         }
     }
+
+    pub type LockGuardRead<'a, T> = RwLockGuard<'a, T>;
+    pub type LockGuardWrite<'a, T> = RwLockGuardMut<'a, T>;
 }
 
 pub use inner::*;

@@ -1,10 +1,14 @@
+use alloc::boxed::Box;
 use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, Ordering};
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable};
 use modular_bitfield::prelude::*;
 use uuid::Uuid;
 use crate::{debug, driver, error, logger, pcie, volatile_struct};
 use crate::device::{uuid_from_device_name, BlockDevice, Device, DeviceError, device_seed_from_pci, BLOCK_DEVICE_REGISTRY, DeviceResult, DeviceTransfer, DeviceOperation};
+use crate::lock::{Lock, LockGuardWrite};
 use crate::memory::address::{PageCount, PhysAddr, PhysAddrPageAligned};
 use crate::memory::{hhdm, MemorySpace};
 use crate::memory::mmio::{VolatileAccess, MMIO};
@@ -118,10 +122,13 @@ struct RequestHeader {
 #[derive(Debug)]
 struct Queue {
     size_shift: u32,
-    owned: bool,
+    owned_phys: bool,
     buffers: MMIO,
     available: MMIO,
     used: MMIO,
+    mmio_lock: Lock<()>,
+    phys: [PhysAddrPageAligned; 3],
+    buffer_slots: Box<[AtomicBool]>,
 }
 
 fn queue_data_sizes(size: u16) -> (u32, [PageCount; 3]) {
@@ -139,15 +146,18 @@ fn queue_data_sizes(size: u16) -> (u32, [PageCount; 3]) {
 }
 
 impl Queue {
-    fn new_at(size: u16, owned: bool, buffers: PhysAddrPageAligned,
+    fn new_at(size: u16, owned_phys: bool, buffers: PhysAddrPageAligned,
               available: PhysAddrPageAligned, used: PhysAddrPageAligned) -> Self {
         let (size_shift, data_sizes) = queue_data_sizes(size);
         Self {
             size_shift,
-            owned,
+            owned_phys,
             buffers: unsafe { MMIO::new(buffers, data_sizes[0], true, false) },
             available: unsafe { MMIO::new(available, data_sizes[1], true, false) },
             used: unsafe { MMIO::new(used, data_sizes[2], false, false) },
+            mmio_lock: Lock::new(()),
+            phys: [buffers, available, used],
+            buffer_slots: Vec::from_fn(size as usize / 3, |_| AtomicBool::new(false)).into_boxed_slice(),
         }
     }
 
@@ -179,27 +189,81 @@ impl Queue {
 
     fn to_regs(&self, regs: &mut Registers) {
         regs.queue_size.store(1 << self.size_shift);
-        regs.queue_desc.store(self.buffers.ptr().as_ptr() as u64);
-        regs.queue_avail.store(self.available.ptr().as_ptr() as u64);
-        regs.queue_used.store(self.used.ptr().as_ptr() as u64);
+        regs.queue_desc.store(self.phys[0].addr() as u64);
+        regs.queue_avail.store(self.phys[1].addr() as u64);
+        regs.queue_used.store(self.phys[2].addr() as u64);
     }
 
     fn buffer(&self, index: u16) -> &mut Volatile<QueueBuffer> {
         self.buffers.get_volatile(index as usize * size_of::<QueueBuffer>())
     }
 
-    fn available_index(&self) -> &mut Volatile<u16> {
-        self.available.get_volatile(2)
-    }
-    fn available_ring(&self, index: u16) -> &mut Volatile<u16> {
-        self.available.get_volatile(4 + index as usize * size_of::<u16>())
+    fn mask_index(&self, index: u16) -> u16 {
+        index & ((1 << self.size_shift) - 1)
     }
 
     fn used_index(&self) -> &mut Volatile<u16> {
         self.used.get_volatile(2)
     }
     fn used_ring(&self, index: u16) -> &mut Volatile<QueueUsed> {
-        self.used.get_volatile(4 + index as usize * size_of::<QueueUsed>())
+        self.used.get_volatile(4 + self.mask_index(index) as usize * size_of::<QueueUsed>())
+    }
+
+    fn allocate_buffer_group(&self) -> Option<BufferGroup> {
+        for (i, group) in self.buffer_slots.iter().enumerate() {
+            if !group.swap(true, Ordering::Acquire) {
+                return Some(BufferGroup(i.try_into().unwrap()));
+            }
+        }
+        None
+    }
+    fn free_buffer_group(&self, group: BufferGroup) {
+        self.buffer_slots[group.0 as usize].store(false, Ordering::Release);
+        core::mem::forget(group);
+    }
+
+    fn lock(&self) -> LockedQueue<'_> {
+        let lock = self.mmio_lock.write();
+        LockedQueue {
+            queue: self,
+            lock,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct LockedQueue<'a> {
+    queue: &'a Queue,
+    lock: LockGuardWrite<'a, ()>,
+}
+
+impl<'a> LockedQueue<'a> {
+    fn available_index(&self) -> &mut Volatile<u16> {
+        self.queue.available.get_volatile(2)
+    }
+    fn available_ring(&self, index: u16) -> &mut Volatile<u16> {
+        self.queue.available.get_volatile(4 + self.queue.mask_index(index) as usize * size_of::<u16>())
+    }
+}
+
+#[derive(Debug)]
+struct BufferGroup(u16);
+
+impl BufferGroup {
+    fn header(&self) -> u16 {
+        self.0 * 3 + 0
+    }
+    fn data(&self) -> u16 {
+        self.0 * 3 + 1
+    }
+    fn status(&self) -> u16 {
+        self.0 * 3 + 2
+    }
+}
+
+impl Drop for BufferGroup {
+    fn drop(&mut self) {
+        error!("BufferGroup dropped (index {})", self.0);
     }
 }
 
@@ -254,6 +318,8 @@ fn init() {
             continue
         };
 
+        debug!("BAR: {:x?}, BAR offsets: {:x?}", data.bar.load(), bar_offsets);
+
         let Some(bar_offsets_0) = bar_offsets[0] else {
             error!("Missing bar offset [0]");
             continue
@@ -279,15 +345,21 @@ fn init() {
 
         debug!("[#{id}] Acquired device id");
 
-        // TODO: crashes when queue size is over 0x400,
-        // TODO: does not crash but hangs when queue size is at most 0x400
-        // let queue = Queue::new(0x400);
+        // TODO: does not process requests when using new queue
+        // let queue = Queue::new(0x100);
+        // queue.to_regs(regs);
+
         let queue = Queue::from_regs(regs);
+
+        if (1 << queue.size_shift) < 0x40 {
+            error!("[#{id}] Default queue is too small: {}", 1 << queue.size_shift);
+            continue;
+        }
 
         let device = BlkDevice::new(
             id, queue, mmio_regs, mmio_storage_regs,
             mmio_notification, notify_multiplier);
-        device.init();
+        device.init_and_register();
 
         id += 1;
     }
@@ -307,12 +379,12 @@ struct BlkDevice {
 
 impl BlkDevice {
     fn new(id: u32, queue: Queue, mmio_regs: MMIO, mmio_storage_regs: MMIO,
-           mmio_notification: MMIO, notify_multiplier: u32) -> Arc<Self> {
+           mmio_notification: MMIO, notify_multiplier: u32) -> Self {
         assert!(id < 100);
         let mut name = *b"virtio_blk00";
         name[10] = (id / 10) as u8 + b'0';
         name[11] = (id % 10) as u8 + b'0';
-        Arc::new(Self {
+        Self {
             id,
             queue,
             mmio_regs,
@@ -321,10 +393,10 @@ impl BlkDevice {
             notify_multiplier,
             name,
             uuid: uuid_from_device_name(device_seed_from_pci::<0x1af4, 0x1001>(id), &name),
-        })
+        }
     }
 
-    fn init(self: Arc<Self>) {
+    fn init_and_register(self) {
         let regs = self.regs();
 
         regs.queue_select.store(0);
@@ -339,7 +411,7 @@ impl BlkDevice {
         let sector_count = self.storage_regs().sector_count;
         debug!("[#{}] Sector count: {}, Storage size: {}", self.id, sector_count, ByteSize64(sector_count * SECTOR_SIZE));
 
-        BLOCK_DEVICE_REGISTRY.add(self);
+        BLOCK_DEVICE_REGISTRY.add(Arc::new(self));
     }
 
     fn regs(&self) -> &mut Registers {
@@ -347,6 +419,112 @@ impl BlkDevice {
     }
     fn storage_regs(&self) -> &StorageRegisters {
         self.mmio_storage_regs.get_ref::<StorageRegisters>(0)
+    }
+
+    fn notify_available(&self) {
+        self.mmio_notification.store::<u16>(
+            (self.regs().queue_notify_off.load() as u32 * self.notify_multiplier) as usize, 0u16);
+    }
+
+    fn check_read_bounds(&self, block: usize, size: usize) -> Result<u32, DeviceError> {
+        let Ok(size): Result<u32, _> = size.try_into() else {
+            return Err(DeviceError::DataSizeTooLarge);
+        };
+        let count = size >> SECTOR_SHIFT;
+        if count << SECTOR_SHIFT != size {
+            return Err(DeviceError::DataSizeUnaligned);
+        }
+        if block + (count as usize) > self.block_count() {
+            return Err(DeviceError::OutOfBounds);
+        }
+        Ok(size)
+    }
+
+    fn submit_rw_request(&self, read: bool, block: usize, data: DeviceTransfer) -> DeviceOperation {
+        let size = match self.check_read_bounds(block, data.size()) {
+            Ok(size) => size,
+            Err(err) => return DeviceOperation::new(DeviceResult::err(data, err)),
+        };
+
+        let (header, phys_header) = SLABS.allocate_one::<RequestHeader>();
+        let (status, phys_status) = SLABS.allocate_one::<u8>();
+
+        Volatile::from_ref(header).store(RequestHeader {
+            type_: if read { RequestType::READ } else { RequestType::WRITE },
+            _reserved1: 0,
+            sector: block as u64,
+        });
+
+        let buf_group = loop {
+            let group = self.queue.allocate_buffer_group();
+            if let Some(group) = group {
+                break group;
+            }
+            sched_yield();
+        };
+
+        self.queue.buffer(buf_group.header()).store(QueueBuffer {
+            addr: phys_header,
+            size: size_of::<RequestHeader>() as u32,
+            flags: QueueBufferFlags::HAS_NEXT,
+            next: 1,
+        });
+        self.queue.buffer(buf_group.data()).store(QueueBuffer {
+            addr: data.phys(),
+            size,
+            flags: if read { QueueBufferFlags::WRITE } else { QueueBufferFlags::empty() } | QueueBufferFlags::HAS_NEXT,
+            next: 2,
+        });
+        self.queue.buffer(buf_group.status()).store(QueueBuffer {
+            addr: phys_status,
+            size: size_of::<u8>() as u32,
+            flags: QueueBufferFlags::WRITE,
+            next: 0,
+        });
+
+        let mut used_idx = self.queue.used_index().load();
+
+        {
+            let queue = self.queue.lock();
+            let index = queue.available_index().load();
+            queue.available_ring(index).store(buf_group.header());
+            queue.available_index().store(index.wrapping_add(1));
+        }
+
+        self.notify_available();
+
+        let result = 'outer: loop {
+            while used_idx != self.queue.used_index().load() {
+                let used = self.queue.used_ring(used_idx).load();
+                if used.index as u16 != buf_group.header() {
+                    used_idx += 1;
+                    continue;
+                }
+
+                let status = Volatile::from_ref(status).load();
+                break 'outer match status {
+                    0x0 => Ok(size as usize),
+                    0x1 => Err(DeviceError::DeviceFault),
+                    0x2 => Err(DeviceError::Unsupported),
+                    _ => {
+                        error!("[#{}] unknown operation result status: {:#x}", self.id, status);
+                        Err(DeviceError::DeviceFault)
+                    }
+                };
+            }
+
+            sched_yield();
+        };
+
+        self.queue.free_buffer_group(buf_group);
+
+        SLABS.deallocate_physical_one::<RequestHeader>(phys_header);
+        SLABS.deallocate_physical_one::<u8>(phys_status);
+
+        DeviceOperation::new(DeviceResult {
+            data,
+            result,
+        })
     }
 }
 
@@ -373,76 +551,7 @@ impl BlockDevice for BlkDevice {
     }
 
     fn read(&self, block: usize, data: DeviceTransfer) -> DeviceOperation {
-        let Ok(size): Result<u32, _> = data.size().try_into() else {
-            return DeviceOperation::new(DeviceResult::err(data, DeviceError::DataSizeTooLarge));
-        };
-        let count = size >> SECTOR_SHIFT;
-        if count << SECTOR_SHIFT != size {
-            return DeviceOperation::new(DeviceResult::err(data, DeviceError::DataSizeUnaligned));
-        }
-        if block + (count as usize) > self.block_count() {
-            return DeviceOperation::new(DeviceResult::err(data, DeviceError::OutOfBounds));
-        }
-
-        let (header, phys_header) = SLABS.allocate_one::<RequestHeader>();
-        let (status, phys_status) = SLABS.allocate_one::<u8>();
-
-        Volatile::from_ref(header).store(RequestHeader {
-            type_: RequestType::READ,
-            _reserved1: 0,
-            sector: block as u64,
-        });
-
-        self.queue.buffer(0).store(QueueBuffer {
-            addr: phys_header,
-            size: size_of::<RequestHeader>() as u32,
-            flags: QueueBufferFlags::HAS_NEXT,
-            next: 1,
-        });
-        self.queue.buffer(1).store(QueueBuffer {
-            addr: data.phys(),
-            size,
-            flags: QueueBufferFlags::WRITE | QueueBufferFlags::HAS_NEXT,
-            next: 2,
-        });
-        self.queue.buffer(2).store(QueueBuffer {
-            addr: phys_status,
-            size: size_of::<u8>() as u32,
-            flags: QueueBufferFlags::WRITE,
-            next: 0,
-        });
-
-        let used_idx = self.queue.used_index().load();
-
-        self.queue.available_ring(0).store(0);
-        self.queue.available_index().modify(|index| index.wrapping_add(1));
-
-        self.mmio_notification.store(
-            (self.regs().queue_notify_off.load() as u32 * self.notify_multiplier) as usize, 0u16);
-
-        let result = loop {
-            if self.queue.used_index().load() != used_idx {
-                let status = Volatile::from_ref(status).load();
-                break match status {
-                    0x0 => Ok(size as usize),
-                    0x1 => Err(DeviceError::DeviceFault),
-                    0x2 => Err(DeviceError::Unsupported),
-                    _ => {
-                        error!("[#{}] unknown operation result status: {:#x}", self.id, status);
-                        Err(DeviceError::DeviceFault)
-                    }
-                };
-            }
-            sched_yield();
-        };
-
-        SLABS.deallocate_physical_one::<RequestHeader>(phys_header);
-        SLABS.deallocate_physical_one::<u8>(phys_status);
-
-        DeviceOperation::new(DeviceResult {
-            data,
-            result,
-        })
+        self.submit_rw_request(true, block, data)
     }
 
     fn write(&self, _block: usize, data: DeviceTransfer) -> DeviceOperation {
