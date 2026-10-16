@@ -1,12 +1,13 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable};
 use modular_bitfield::prelude::*;
 use uuid::Uuid;
-use crate::{debug, driver, error, logger, pcie, volatile_struct};
+use crate::{debug, driver, error, interrupts, logger, pcie, volatile_struct};
 use crate::device::{uuid_from_device_name, BlockDevice, Device, DeviceError, device_seed_from_pci, BLOCK_DEVICE_REGISTRY, DeviceResult, DeviceTransfer, DeviceOperation};
 use crate::lock::{Lock, LockGuardWrite};
 use crate::memory::address::{PageCount, PhysAddr, PhysAddrPageAligned};
@@ -118,7 +119,6 @@ struct RequestHeader {
     sector: u64,
 }
 
-// TODO: Drop implementation for owned queues
 #[derive(Debug)]
 struct Queue {
     size_shift: u32,
@@ -231,6 +231,19 @@ impl Queue {
     }
 }
 
+impl Drop for Queue {
+    fn drop(&mut self) {
+        if self.owned_phys {
+            let (_, data_sizes) = queue_data_sizes(1 << self.size_shift);
+            MemorySpace::with(|space| {
+                self.phys.into_iter().zip(data_sizes).for_each(|(phys, size)| {
+                    space.phys_dealloc(phys, size);
+                });
+            });
+        }
+    }
+}
+
 #[derive(Debug)]
 struct LockedQueue<'a> {
     queue: &'a Queue,
@@ -275,6 +288,8 @@ fn map_bar(data: &pcie::DeviceHeaderDataGeneral,
                  PageCount::pages_up(length.min(0x10000) as usize), writable)
 }
 
+static ISR_STATUS: AtomicPtr<Volatile<u8>> = AtomicPtr::new(core::ptr::null_mut());
+
 fn init() {
     let devices = pcie::use_devices(|device| {
         device.vendor.load() == 0x1af4 && device.device.load() == 0x1001
@@ -318,6 +333,20 @@ fn init() {
             continue
         };
 
+        assert!(interrupts::attach_irq(0x20 + data.interrupt_line.load() as u16, |_ctx| {
+            if let Some(ptr) = NonNull::new(ISR_STATUS.load(Ordering::Relaxed)) {
+                let status = unsafe { ptr.as_ref() }.load();
+                debug!("Interrupt status {:?}", status);
+                if status & 0x1 != 0 {
+                    // TODO: operation finished
+                }
+                if status & 0x2 != 0 {
+                    error!("Configuration changed");
+                }
+            }
+            // TODO: interrupt chaining in case of multiple devices using the same line
+        }, false));
+
         debug!("BAR: {:x?}, BAR offsets: {:x?}", data.bar.load(), bar_offsets);
 
         let Some(bar_offsets_0) = bar_offsets[0] else {
@@ -328,6 +357,10 @@ fn init() {
             error!("Missing bar offset [1]");
             continue
         };
+        let Some(bar_offsets_2) = bar_offsets[2] else {
+            error!("Missing bar offset [2]");
+            continue
+        };
         let Some(bar_offsets_3) = bar_offsets[3] else {
             error!("Missing bar offset [3]");
             continue
@@ -335,6 +368,10 @@ fn init() {
         let mmio_regs = map_bar(data, bar_offsets_0, true);
         let mmio_storage_regs = map_bar(data, bar_offsets_3, false);
         let mmio_notification = map_bar(data, bar_offsets_1, true);
+        let mmio_isr = map_bar(data, bar_offsets_2, false);
+
+        // TODO: do properly without a global variable
+        ISR_STATUS.store(mmio_isr.get_ptr(0).as_ptr(), Ordering::Relaxed);
 
         let regs = mmio_regs.get_mut::<Registers>(0);
 
@@ -358,7 +395,7 @@ fn init() {
 
         let device = BlkDevice::new(
             id, queue, mmio_regs, mmio_storage_regs,
-            mmio_notification, notify_multiplier);
+            mmio_notification, mmio_isr, notify_multiplier);
         device.init_and_register();
 
         id += 1;
@@ -372,6 +409,7 @@ struct BlkDevice {
     mmio_regs: MMIO,
     mmio_storage_regs: MMIO,
     mmio_notification: MMIO,
+    mmio_isr: MMIO,
     notify_multiplier: u32,
     name: [u8; 12],
     uuid: Uuid,
@@ -379,7 +417,7 @@ struct BlkDevice {
 
 impl BlkDevice {
     fn new(id: u32, queue: Queue, mmio_regs: MMIO, mmio_storage_regs: MMIO,
-           mmio_notification: MMIO, notify_multiplier: u32) -> Self {
+           mmio_notification: MMIO, mmio_isr: MMIO, notify_multiplier: u32) -> Self {
         assert!(id < 100);
         let mut name = *b"virtio_blk00";
         name[10] = (id / 10) as u8 + b'0';
@@ -390,6 +428,7 @@ impl BlkDevice {
             mmio_regs,
             mmio_storage_regs,
             mmio_notification,
+            mmio_isr,
             notify_multiplier,
             name,
             uuid: uuid_from_device_name(device_seed_from_pci::<0x1af4, 0x1001>(id), &name),
@@ -406,6 +445,8 @@ impl BlkDevice {
         regs.device_status.modify(|s| s.with_driver(true));
         regs.device_status.modify(|s| s.with_features_ok(true));
         regs.device_status.modify(|s| s.with_ready(true));
+
+        self.queue.available.store(0, 0u16);
 
         debug!("[#{}] Initialized device", self.id);
         let sector_count = self.storage_regs().sector_count;

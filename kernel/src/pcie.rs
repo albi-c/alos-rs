@@ -90,13 +90,48 @@ impl DeviceCapabilityVendorSpecific {
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeviceCapabilityPciExpress {
+    _padding1: u32,
     pub capabilities: u32,
+}
+
+#[bitfield]
+#[derive(Debug)]
+pub struct DeviceCapabilityMsiXMessageControl {
+    pub table_size: B11,
+    _reserved1: B3,
+    pub function_mask: bool,
+    pub enable: bool,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct DeviceCapabilityMsiXOffsetAndBIR(u32);
+
+impl DeviceCapabilityMsiXOffsetAndBIR {
+    pub fn bir(self) -> usize {
+        (self.0 & 0x3) as usize
+    }
+    pub fn offset(self) -> usize {
+        (self.0 & !0x3) as usize
+    }
+    pub fn bir_and_offset(self) -> (usize, usize) {
+        (self.bir(), self.offset())
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct DeviceCapabilityMsiX {
+    _padding1: u16,
+    pub message_control: u16,
+    pub table: DeviceCapabilityMsiXOffsetAndBIR,
+    pub pending_bit: DeviceCapabilityMsiXOffsetAndBIR,
 }
 
 #[derive(Debug)]
 pub enum DeviceCapability {
     VendorSpecific(DeviceCapabilityVendorSpecific),
     PciExpress(DeviceCapabilityPciExpress),
+    MsiX(&'static mut DeviceCapabilityMsiX),
     Unknown {
         id: u8,
         extension: u16,
@@ -151,11 +186,11 @@ impl DeviceHeader {
                     let id = cap as u8;
                     self.next = ((cap >> 8) & 0xff) as u16;
                     let extension = (cap >> 16) as u16;
-                    let data_ptr = unsafe { ptr.byte_add(4) };
                     Some(match id {
                         0x09 => DeviceCapability::VendorSpecific(
-                            DeviceCapabilityVendorSpecific(extension, data_ptr.cast())),
-                        0x10 => DeviceCapability::PciExpress(unsafe { data_ptr.cast().read() }),
+                            DeviceCapabilityVendorSpecific(extension, unsafe { ptr.byte_add(4) }.cast())),
+                        0x10 => DeviceCapability::PciExpress(unsafe { ptr.cast().read() }),
+                        0x11 => DeviceCapability::MsiX(unsafe { ptr.cast().as_mut() }),
                         _ => DeviceCapability::Unknown {
                             id,
                             extension,
