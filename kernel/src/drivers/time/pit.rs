@@ -11,6 +11,7 @@ const PER_SECOND: u64 = FREQUENCY / DIVISOR as u64;
 const US_PER_TICK: u64 = 1000000 / I_REQ_TIME_STEP;
 
 static TICKS: AtomicU64 = AtomicU64::new(0);
+static mut IRQ_HANDLER_DATA: [u8; 24] = [0; 24];
 
 const_port!(PORT: 0x40, 4);
 
@@ -20,8 +21,8 @@ fn interrupt_handler(_ctx: IrqContext) {
 }
 
 pub fn init() {
-    assert!(interrupts::attach_irq(32, interrupt_handler, true),
-            "Failed to initialize PIT interrupts");
+    #[expect(static_mut_refs)]
+    interrupts::early_attach_irq(32, &interrupt_handler, unsafe { &mut IRQ_HANDLER_DATA });
     
     PORT.out_b(3, 0b00110100);
     PORT.out_b(0, DIVISOR as u8);

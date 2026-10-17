@@ -83,9 +83,6 @@ fn exception_handler(ctx: interrupts::ExcContext) {
         panic_no_message();
     }
 }
-fn irq_handler(ctx: interrupts::IrqContext) {
-    debug!("IRQ: {:#x?}", ctx);
-}
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
@@ -99,12 +96,8 @@ unsafe extern "C" fn kmain() -> ! {
     gdt::init();
 
     interrupts::init(0x0000);
-    for i in 0..256 {
-        if i < 32 {
-            interrupts::attach_exc(i, exception_handler, true);
-        } else{
-            interrupts::attach_irq(i, irq_handler, true);
-        }
+    for i in 0..32 {
+        interrupts::attach_exc(i, exception_handler, true);
     }
 
     pit::init();

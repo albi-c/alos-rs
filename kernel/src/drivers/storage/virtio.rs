@@ -1,8 +1,7 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable};
 use modular_bitfield::prelude::*;
@@ -288,8 +287,6 @@ fn map_bar(data: &pcie::DeviceHeaderDataGeneral,
                  PageCount::pages_up(length.min(0x10000) as usize), writable)
 }
 
-static ISR_STATUS: AtomicPtr<Volatile<u8>> = AtomicPtr::new(core::ptr::null_mut());
-
 fn init() {
     let devices = pcie::use_devices(|device| {
         device.vendor.load() == 0x1af4 && device.device.load() == 0x1001
@@ -333,20 +330,6 @@ fn init() {
             continue
         };
 
-        assert!(interrupts::attach_irq(0x20 + data.interrupt_line.load() as u16, |_ctx| {
-            if let Some(ptr) = NonNull::new(ISR_STATUS.load(Ordering::Relaxed)) {
-                let status = unsafe { ptr.as_ref() }.load();
-                debug!("Interrupt status {:?}", status);
-                if status & 0x1 != 0 {
-                    // TODO: operation finished
-                }
-                if status & 0x2 != 0 {
-                    error!("Configuration changed");
-                }
-            }
-            // TODO: interrupt chaining in case of multiple devices using the same line
-        }, false));
-
         debug!("BAR: {:x?}, BAR offsets: {:x?}", data.bar.load(), bar_offsets);
 
         let Some(bar_offsets_0) = bar_offsets[0] else {
@@ -370,9 +353,6 @@ fn init() {
         let mmio_notification = map_bar(data, bar_offsets_1, true);
         let mmio_isr = map_bar(data, bar_offsets_2, false);
 
-        // TODO: do properly without a global variable
-        ISR_STATUS.store(mmio_isr.get_ptr(0).as_ptr(), Ordering::Relaxed);
-
         let regs = mmio_regs.get_mut::<Registers>(0);
 
         if regs.num_queues.load() != 1 {
@@ -395,7 +375,8 @@ fn init() {
 
         let device = BlkDevice::new(
             id, queue, mmio_regs, mmio_storage_regs,
-            mmio_notification, mmio_isr, notify_multiplier);
+            mmio_notification, mmio_isr, notify_multiplier,
+            data.interrupt_line.load());
         device.init_and_register();
 
         id += 1;
@@ -413,11 +394,13 @@ struct BlkDevice {
     notify_multiplier: u32,
     name: [u8; 12],
     uuid: Uuid,
+    interrupt_line: u8,
 }
 
 impl BlkDevice {
     fn new(id: u32, queue: Queue, mmio_regs: MMIO, mmio_storage_regs: MMIO,
-           mmio_notification: MMIO, mmio_isr: MMIO, notify_multiplier: u32) -> Self {
+           mmio_notification: MMIO, mmio_isr: MMIO, notify_multiplier: u32,
+           interrupt_line: u8) -> Self {
         assert!(id < 100);
         let mut name = *b"virtio_blk00";
         name[10] = (id / 10) as u8 + b'0';
@@ -432,6 +415,7 @@ impl BlkDevice {
             notify_multiplier,
             name,
             uuid: uuid_from_device_name(device_seed_from_pci::<0x1af4, 0x1001>(id), &name),
+            interrupt_line,
         }
     }
 
@@ -452,7 +436,19 @@ impl BlkDevice {
         let sector_count = self.storage_regs().sector_count;
         debug!("[#{}] Sector count: {}, Storage size: {}", self.id, sector_count, ByteSize64(sector_count * SECTOR_SIZE));
 
-        BLOCK_DEVICE_REGISTRY.add(Arc::new(self));
+        let device = Arc::new(self);
+        BLOCK_DEVICE_REGISTRY.add(device.clone());
+
+        interrupts::attach_irq(0x20 + device.interrupt_line, move |_ctx| {
+            let status = device.mmio_isr.load::<u8>(0);
+            debug!("Interrupt status {:?}", status);
+            if status & 0x1 != 0 {
+                // TODO: operation finished
+            }
+            if status & 0x2 != 0 {
+                error!("Configuration changed");
+            }
+        });
     }
 
     fn regs(&self) -> &mut Registers {

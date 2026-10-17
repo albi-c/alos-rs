@@ -1,4 +1,9 @@
+use alloc::boxed::Box;
 use core::arch::asm;
+use core::mem::MaybeUninit;
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicPtr, Ordering};
+use bytemuck::Zeroable;
 use macros::{interrupt_handlers, interrupt_handlers_arr};
 use crate::cpu;
 use crate::lock::Lock;
@@ -60,16 +65,16 @@ impl Info {
 
 type AsmHandler = unsafe extern "C" fn() -> ();
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct IrqContext {
-    pub irq: u16,
+    pub irq: u8,
     pub flags: u64,
     pub sp: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct ExcContext {
-    pub exc: u16,
+    pub exc: u8,
     pub error: u64,
     pub address: u64,
     pub instruction: u64,
@@ -86,6 +91,63 @@ static mut IDT: [IdtEntry; 256] = unsafe { core::mem::zeroed() };
 static mut HANDLERS: [u64; 256] = unsafe { core::mem::zeroed() };
 static HANDLERS_REPLACEABLE: Lock<[bool; 256]> = Lock::new(unsafe { core::mem::zeroed() });
 
+#[repr(C)]
+struct HandlerChainNode {
+    next: Option<NonNull<HandlerChainNode>>,
+    handler: &'static dyn Fn(IrqContext),
+}
+
+#[repr(transparent)]
+struct HandlerChain {
+    handlers: AtomicPtr<HandlerChainNode>,
+}
+
+impl HandlerChain {
+    const fn new() -> Self {
+        Self {
+            handlers: AtomicPtr::new(core::ptr::null_mut()),
+        }
+    }
+
+    fn add_at(&self, handler: &'static dyn Fn(IrqContext), node: &mut MaybeUninit<HandlerChainNode>) {
+        let mut next = self.handlers.load(Ordering::SeqCst);
+        node.write(HandlerChainNode {
+            next: NonNull::new(next),
+            handler,
+        });
+        let node = unsafe { node.assume_init_mut() };
+        loop {
+            match self.handlers.compare_exchange_weak(next, node, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break,
+                Err(new_next) => {
+                    next = new_next;
+                    node.next = NonNull::new(new_next);
+                },
+            }
+        }
+    }
+
+    fn add(&self, handler: &'static dyn Fn(IrqContext)) {
+        self.add_at(handler, Box::leak(Box::new(MaybeUninit::new(HandlerChainNode {
+            next: None,
+            handler,
+        }))))
+    }
+
+    fn call(&self, ctx: IrqContext) {
+        let mut next = NonNull::new(self.handlers.load(Ordering::Relaxed));
+        while let Some(ptr) = next {
+            let node = unsafe { ptr.as_ref() };
+            (node.handler)(ctx);
+            next = node.next;
+        }
+    }
+}
+
+unsafe impl Zeroable for HandlerChain {}
+
+static HANDLER_CHAINS: [HandlerChain; 224] = bytemuck::zeroed();
+
 static mut ASM_IRQ_HANDLER_TABLE: [u64; 256] = unsafe { core::mem::zeroed() };
 interrupt_handlers!();
 
@@ -101,13 +163,15 @@ pub struct InterruptStackFrame {
     _pad1: [u8; 6],
 }
 
-fn default_irq_handler(_: IrqContext) {}
+fn default_irq_handler(ctx: IrqContext) {
+    HANDLER_CHAINS[ctx.irq as usize - 32].call(ctx);
+}
 fn default_exc_handler(_: ExcContext) {}
 
 const USER_CS: u16 = 0x20 | 0x3;
 
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u16) {
+pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u8) {
     let user = frame.cs == USER_CS;
     if user {
         unsafe { asm!("swapgs", options(nostack, nomem, preserves_flags)); }
@@ -123,7 +187,7 @@ pub extern "C" fn irq_handler(frame: &InterruptStackFrame, irq: u16) {
     }
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn exc_handler(frame: &InterruptStackFrame, exc: u16, error_code: u64) {
+pub extern "C" fn exc_handler(frame: &InterruptStackFrame, exc: u8, error_code: u64) {
     let rbp: u64;
     unsafe { asm!("mov {0}, rbp", out(reg) rbp) };
     let cr2: u64;
@@ -172,7 +236,7 @@ pub fn init(mask: u16) {
 
     HANDLERS_REPLACEABLE.write().fill(true);
 
-    #[allow(static_mut_refs)]
+    #[expect(static_mut_refs)]
     let info = unsafe { Info::new(&IDT) };
 
     cpu::disable_interrupts();
@@ -206,11 +270,21 @@ fn attach(irq: usize, handler: u64, replaceable: bool) -> bool {
     }
 }
 
-pub fn attach_irq(irq: u16, handler: IrqHandler, replaceable: bool) -> bool {
+pub fn early_attach_irq(irq: u8, handler: &'static dyn Fn(IrqContext), mem: &'static mut [u8; 24]) {
     assert!(irq >= 32, "Interrupts below ID 32 are exceptions");
-    attach(irq as usize, unsafe { core::mem::transmute(handler) }, replaceable)
+    const {
+        assert!(size_of::<HandlerChainNode>() == 24);
+    }
+    HANDLER_CHAINS[irq as usize - 32].add_at(handler, unsafe { core::mem::transmute(mem) });
 }
-pub fn attach_exc(exc: u16, handler: ExcHandler, replaceable: bool) -> bool {
+pub fn attach_irq_ref(irq: u8, handler: &'static dyn Fn(IrqContext)) {
+    assert!(irq >= 32, "Interrupts below ID 32 are exceptions");
+    HANDLER_CHAINS[irq as usize - 32].add(handler);
+}
+pub fn attach_irq(irq: u8, handler: impl Fn(IrqContext) + 'static) {
+    attach_irq_ref(irq, Box::leak(Box::new(handler)));
+}
+pub fn attach_exc(exc: u8, handler: ExcHandler, replaceable: bool) -> bool {
     assert!(exc < 32, "Interrupts from ID 32 are not exceptions");
     attach(exc as usize, unsafe { core::mem::transmute(handler) }, replaceable)
 }

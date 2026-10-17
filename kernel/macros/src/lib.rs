@@ -7,7 +7,7 @@ struct Handler(usize);
 
 impl ToTokens for Handler {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let n: u16 = self.0.try_into().unwrap();
+        let n: u8 = self.0.try_into().unwrap();
         let ident = Ident::new(
             &format!("_interrupt_handler_{}", n), proc_macro2::Span::call_site());
         tokens.extend(match n {
@@ -47,7 +47,6 @@ impl ToTokens for Handler {
                 #[unsafe(no_mangle)]
                 extern "x86-interrupt" fn #ident(_frame: crate::interrupts::InterruptStackFrame) {}
             },
-            _ => panic!("Invalid interrupt number: {}", n),
         });
     }
 }
