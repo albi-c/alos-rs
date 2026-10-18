@@ -43,6 +43,9 @@ _task_switch_continue:
 
 	pop rdi
 
+	cld
+	sti
+
 	ret
 
 _switch_to_ring_3:

@@ -2,6 +2,20 @@ use core::arch::asm;
 use core::sync::atomic::{compiler_fence, Ordering};
 
 #[inline(always)]
+pub fn query_interrupts() -> bool {
+    let flags: usize;
+    unsafe {
+        asm!(
+            "pushf",
+            "pop {}",
+            out(reg) flags,
+            options(nomem)
+        );
+    }
+    flags & 0x200 != 0
+}
+
+#[inline(always)]
 pub fn disable_interrupts() {
     unsafe {
         asm!(

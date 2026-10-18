@@ -1,13 +1,14 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::ptr::NonNull;
+use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable};
 use modular_bitfield::prelude::*;
 use uuid::Uuid;
 use crate::{debug, driver, error, interrupts, logger, pcie, volatile_struct};
-use crate::device::{uuid_from_device_name, BlockDevice, Device, DeviceError, device_seed_from_pci, BLOCK_DEVICE_REGISTRY, DeviceResult, DeviceTransfer, DeviceOperation};
+use crate::device::{uuid_from_device_name, BlockDevice, Device, DeviceError, device_seed_from_pci, BLOCK_DEVICE_REGISTRY, DeviceResult, DeviceTransfer, DeviceOperation, DeviceFuture, DeviceRef};
 use crate::lock::{Lock, LockGuardWrite};
 use crate::memory::address::{PageCount, PhysAddr, PhysAddrPageAligned};
 use crate::memory::{hhdm, MemorySpace};
@@ -153,7 +154,7 @@ impl Queue {
             owned_phys,
             buffers: unsafe { MMIO::new(buffers, data_sizes[0], true, false) },
             available: unsafe { MMIO::new(available, data_sizes[1], true, false) },
-            used: unsafe { MMIO::new(used, data_sizes[2], false, false) },
+            used: unsafe { MMIO::new(used, data_sizes[2], true, false) },
             mmio_lock: Lock::new(()),
             phys: [buffers, available, used],
             buffer_slots: Vec::from_fn(size as usize / 3, |_| AtomicBool::new(false)).into_boxed_slice(),
@@ -262,6 +263,10 @@ impl<'a> LockedQueue<'a> {
 struct BufferGroup(u16);
 
 impl BufferGroup {
+    fn index(&self) -> u16 {
+        self.0
+    }
+
     fn header(&self) -> u16 {
         self.0 * 3 + 0
     }
@@ -270,12 +275,6 @@ impl BufferGroup {
     }
     fn status(&self) -> u16 {
         self.0 * 3 + 2
-    }
-}
-
-impl Drop for BufferGroup {
-    fn drop(&mut self) {
-        error!("BufferGroup dropped (index {})", self.0);
     }
 }
 
@@ -384,6 +383,14 @@ fn init() {
 }
 
 #[derive(Debug)]
+struct FutureSharedData {
+    status: AtomicU32,
+    status_ref: &'static Volatile<u8>,
+    phys_status: PhysAddr,
+    phys_header: PhysAddr,
+}
+
+#[derive(Debug)]
 struct BlkDevice {
     id: u32,
     queue: Queue,
@@ -395,17 +402,22 @@ struct BlkDevice {
     name: [u8; 12],
     uuid: Uuid,
     interrupt_line: u8,
+    futures: NonNull<[Option<Arc<FutureSharedData>>]>,
+    used_index: AtomicU16,
+    used_lock: Lock<()>,
 }
 
 impl BlkDevice {
     fn new(id: u32, queue: Queue, mmio_regs: MMIO, mmio_storage_regs: MMIO,
            mmio_notification: MMIO, mmio_isr: MMIO, notify_multiplier: u32,
-           interrupt_line: u8) -> Self {
+           interrupt_line: u8) -> &'static mut Self {
         assert!(id < 100);
         let mut name = *b"virtio_blk00";
         name[10] = (id / 10) as u8 + b'0';
         name[11] = (id % 10) as u8 + b'0';
-        Self {
+        Box::leak(Box::new(Self {
+            futures: NonNull::from(Box::leak(Vec::from_fn(queue.buffer_slots.len(), |_| None).into_boxed_slice())),
+            used_index: AtomicU16::new(queue.used_index().load()),
             id,
             queue,
             mmio_regs,
@@ -416,10 +428,11 @@ impl BlkDevice {
             name,
             uuid: uuid_from_device_name(device_seed_from_pci::<0x1af4, 0x1001>(id), &name),
             interrupt_line,
-        }
+            used_lock: Lock::new(()),
+        }))
     }
 
-    fn init_and_register(self) {
+    fn init_and_register(self: DeviceRef<Self>) {
         let regs = self.regs();
 
         regs.queue_select.store(0);
@@ -431,39 +444,42 @@ impl BlkDevice {
         regs.device_status.modify(|s| s.with_ready(true));
 
         self.queue.available.store(0, 0u16);
+        self.queue.used.store(0, 0u16);
 
         debug!("[#{}] Initialized device", self.id);
         let sector_count = self.storage_regs().sector_count;
         debug!("[#{}] Sector count: {}, Storage size: {}", self.id, sector_count, ByteSize64(sector_count * SECTOR_SIZE));
 
-        let device = Arc::new(self);
-        BLOCK_DEVICE_REGISTRY.add(device.clone());
-
-        interrupts::attach_irq(0x20 + device.interrupt_line, move |_ctx| {
-            let status = device.mmio_isr.load::<u8>(0);
-            debug!("Interrupt status {:?}", status);
+        interrupts::attach_irq(0x20 + self.interrupt_line, move |_ctx| {
+            let status = self.mmio_isr.load::<u8>(0);
             if status & 0x1 != 0 {
-                // TODO: operation finished
+                self.handle_responses()
             }
             if status & 0x2 != 0 {
-                error!("Configuration changed");
+                error!("#[{}] Configuration changed", self.id);
             }
         });
+
+        BLOCK_DEVICE_REGISTRY.add(self);
     }
 
-    fn regs(&self) -> &mut Registers {
+    fn futures(self: DeviceRef<Self>) -> &'static mut [Option<Arc<FutureSharedData>>] {
+        unsafe { &mut *self.futures.as_ptr() }
+    }
+
+    fn regs(self: DeviceRef<Self>) -> &'static mut Registers {
         self.mmio_regs.get_mut::<Registers>(0)
     }
-    fn storage_regs(&self) -> &StorageRegisters {
+    fn storage_regs(self: DeviceRef<Self>) -> &'static StorageRegisters {
         self.mmio_storage_regs.get_ref::<StorageRegisters>(0)
     }
 
-    fn notify_available(&self) {
+    fn notify_available(self: DeviceRef<Self>) {
         self.mmio_notification.store::<u16>(
             (self.regs().queue_notify_off.load() as u32 * self.notify_multiplier) as usize, 0u16);
     }
 
-    fn check_read_bounds(&self, block: usize, size: usize) -> Result<u32, DeviceError> {
+    fn check_read_bounds(self: DeviceRef<Self>, block: usize, size: usize) -> Result<u32, DeviceError> {
         let Ok(size): Result<u32, _> = size.try_into() else {
             return Err(DeviceError::DataSizeTooLarge);
         };
@@ -477,10 +493,10 @@ impl BlkDevice {
         Ok(size)
     }
 
-    fn submit_rw_request(&self, read: bool, block: usize, data: DeviceTransfer) -> DeviceOperation {
+    fn submit_rw_request(self: DeviceRef<Self>, read: bool, block: usize, data: DeviceTransfer) -> DeviceOperation {
         let size = match self.check_read_bounds(block, data.size()) {
             Ok(size) => size,
-            Err(err) => return DeviceOperation::new(DeviceResult::err(data, err)),
+            Err(err) => return Future::failed(data, err),
         };
 
         let (header, phys_header) = SLABS.allocate_one::<RequestHeader>();
@@ -499,6 +515,15 @@ impl BlkDevice {
             }
             sched_yield();
         };
+
+        let shared = Arc::new(FutureSharedData {
+            status: AtomicU32::new(u32::MAX),
+            status_ref: Volatile::from_ref(status),
+            phys_status,
+            phys_header,
+        });
+        assert!(self.futures()[buf_group.index() as usize].replace(shared.clone()).is_none(),
+                "virtio-blk: Queue::allocate_buffer_group returned used index");
 
         self.queue.buffer(buf_group.header()).store(QueueBuffer {
             addr: phys_header,
@@ -519,8 +544,6 @@ impl BlkDevice {
             next: 0,
         });
 
-        let mut used_idx = self.queue.used_index().load();
-
         {
             let queue = self.queue.lock();
             let index = queue.available_index().load();
@@ -530,69 +553,153 @@ impl BlkDevice {
 
         self.notify_available();
 
-        let result = 'outer: loop {
-            while used_idx != self.queue.used_index().load() {
-                let used = self.queue.used_ring(used_idx).load();
-                if used.index as u16 != buf_group.header() {
-                    used_idx += 1;
-                    continue;
-                }
+        Future::ok(FutureOk {
+            device: self,
+            data,
+            shared,
+        })
+    }
 
-                let status = Volatile::from_ref(status).load();
-                break 'outer match status {
-                    0x0 => Ok(size as usize),
-                    0x1 => Err(DeviceError::DeviceFault),
-                    0x2 => Err(DeviceError::Unsupported),
-                    _ => {
-                        error!("[#{}] unknown operation result status: {:#x}", self.id, status);
-                        Err(DeviceError::DeviceFault)
-                    }
-                };
-            }
-
-            sched_yield();
+    fn handle_responses(self: DeviceRef<Self>) {
+        let (mut start, end) = {
+            let lock = self.used_lock.write();
+            let start = self.used_index.load(Ordering::SeqCst);
+            let end = self.queue.used_index().load();
+            self.used_index.store(end, Ordering::SeqCst);
+            drop(lock);
+            (start, end)
         };
 
-        self.queue.free_buffer_group(buf_group);
+        while start != end {
+            let used = self.queue.used_ring(start).load();
+            self.handle_used(used);
+            start = start.wrapping_add(1);
+        }
+    }
 
-        SLABS.deallocate_physical_one::<RequestHeader>(phys_header);
-        SLABS.deallocate_physical_one::<u8>(phys_status);
+    fn handle_used(self: DeviceRef<Self>, used: QueueUsed) {
+        let buf_group = BufferGroup((used.index / 3).try_into()
+            .expect("virtio-blk: queue used buffer index too large"));
 
-        DeviceOperation::new(DeviceResult {
-            data,
-            result,
-        })
+        let fut = &mut self.futures()[buf_group.index() as usize];
+        match fut {
+            Some(_) => {
+                let shared = fut.take()
+                    .expect("virtio-blk: shared data was taken");
+
+                shared.status.store(shared.status_ref.load() as u32, Ordering::SeqCst);
+
+                SLABS.deallocate_physical_one::<RequestHeader>(shared.phys_header);
+                SLABS.deallocate_physical_one::<u8>(shared.phys_status);
+
+                self.queue.free_buffer_group(buf_group);
+            },
+            None => {
+                panic!("virtio-blk: missing status Arc for group with index {:#x}, base {:#x}",
+                       buf_group.index(), buf_group.header());
+            },
+        }
     }
 }
 
 impl Device for BlkDevice {
-    fn name(&self) -> &str {
+    fn name(self: DeviceRef<Self>) -> &'static str {
         unsafe { core::str::from_utf8_unchecked(&self.name) }
     }
-    fn uuid(&self) -> Uuid {
+    fn uuid(self: DeviceRef<Self>) -> Uuid {
         self.uuid
     }
 }
 
 impl BlockDevice for BlkDevice {
-    fn block_size_shift(&self) -> u32 {
+    fn block_size_shift(self: DeviceRef<Self>) -> u32 {
         SECTOR_SHIFT
     }
 
-    fn block_count(&self) -> usize {
+    fn block_count(self: DeviceRef<Self>) -> usize {
         self.storage_regs().sector_count as usize
     }
 
-    fn max_data_size(&self) -> usize {
+    fn max_data_size(self: DeviceRef<Self>) -> usize {
         u32::MAX as usize
     }
 
-    fn read(&self, block: usize, data: DeviceTransfer) -> DeviceOperation {
+    fn read(self: DeviceRef<Self>, block: usize, data: DeviceTransfer) -> DeviceOperation {
         self.submit_rw_request(true, block, data)
     }
 
-    fn write(&self, _block: usize, data: DeviceTransfer) -> DeviceOperation {
-        DeviceOperation::new(DeviceResult::err(data, DeviceError::Unsupported))
+    fn write(self: DeviceRef<Self>, _block: usize, data: DeviceTransfer) -> DeviceOperation {
+        Future::failed(data, DeviceError::Unsupported)
+    }
+}
+
+#[derive(Debug)]
+struct FutureOk {
+    device: DeviceRef<BlkDevice>,
+    data: DeviceTransfer,
+    shared: Arc<FutureSharedData>,
+}
+
+impl FutureOk {
+    fn is_finished(&self) -> bool {
+        self.shared.status.load(Ordering::SeqCst) != u32::MAX
+    }
+
+    fn to_result(self) -> DeviceResult {
+        let status = self.shared.status.load(Ordering::SeqCst);
+        assert_ne!(status, u32::MAX,
+                   "virtio-blk: FutureOk::to_result called, but operation is not finished");
+
+        let data_size = self.data.size();
+        match status {
+            0x0 => DeviceResult::ok(self.data, data_size),
+            0x1 => DeviceResult::err(self.data, DeviceError::DeviceFault),
+            0x2 => DeviceResult::err(self.data, DeviceError::Unsupported),
+            _ => {
+                error!("[#{}] unknown operation result status: {:#x}", self.device.id, status);
+                DeviceResult::err(self.data, DeviceError::DeviceFault)
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+enum Future {
+    Failed(DeviceTransfer, DeviceError),
+    Waiting(FutureOk),
+    Finished,
+}
+
+impl Future {
+    fn failed(data: DeviceTransfer, err: DeviceError) -> DeviceOperation {
+        Box::new(Self::Failed(data, err))
+    }
+
+    fn ok(ok: FutureOk) -> DeviceOperation {
+        Box::new(Self::Waiting(ok))
+    }
+}
+
+impl DeviceFuture for Future {
+    fn poll(&mut self) -> Option<DeviceResult> {
+        match self {
+            Self::Failed(_, _) => {
+                let Future::Failed(data, err) = core::mem::replace(self, Self::Finished) else {
+                    unreachable!();
+                };
+                Some(DeviceResult::err(data, err))
+            },
+            Self::Waiting(fut) => {
+                if !fut.is_finished() {
+                    return None;
+                }
+                let Future::Waiting(fut) = core::mem::replace(self, Self::Finished) else {
+                    unreachable!();
+                };
+                Some(fut.to_result())
+            },
+            Self::Finished => panic!("virtio-blk: Future::poll called after result returned"),
+        }
     }
 }
 

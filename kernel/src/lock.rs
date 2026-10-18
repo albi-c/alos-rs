@@ -1,13 +1,17 @@
 use crate::cpu;
 
 #[derive(Debug)]
-struct InterruptGuard(bool);
+pub struct InterruptGuard(bool);
 
 impl !Send for InterruptGuard {}
 
 impl InterruptGuard {
     pub fn new() -> Self {
         InterruptGuard(cpu::query_and_disable_interrupts())
+    }
+
+    pub fn release(self) {
+        drop(self);
     }
 }
 

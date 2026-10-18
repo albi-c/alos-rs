@@ -225,9 +225,9 @@ pub fn init(mask: u16) {
     for i in  0..256 {
         unsafe {
             HANDLERS[i] = if i < 32 {
-                core::mem::transmute(default_exc_handler as ExcHandler)
+                default_exc_handler as ExcHandler as u64
             } else {
-                core::mem::transmute(default_irq_handler as IrqHandler)
+                default_irq_handler as IrqHandler as u64
             };
 
             IDT[i] = IdtEntry::new(ASM_IRQ_HANDLER_TABLE[i], i < 32, i);

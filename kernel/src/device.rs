@@ -1,6 +1,6 @@
+use alloc::boxed::Box;
 use alloc::collections::btree_map::Entry;
 use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
 use core::fmt::Debug;
 use core::ptr::NonNull;
 use uuid::Uuid;
@@ -30,9 +30,11 @@ pub enum DeviceError {
     DeviceFault,
 }
 
-pub struct DeviceRegistry<T: Device + ?Sized> {
+pub type DeviceRef<T> = &'static T;
+
+pub struct DeviceRegistry<T: Device + ?Sized + 'static> {
     name: &'static str,
-    devices: Lock<BTreeMap<Uuid, Arc<T>>>,
+    devices: Lock<BTreeMap<Uuid, DeviceRef<T>>>,
 }
 
 impl<T: Device + ?Sized> DeviceRegistry<T> {
@@ -43,7 +45,7 @@ impl<T: Device + ?Sized> DeviceRegistry<T> {
         }
     }
 
-    pub fn add(&self, device: Arc<T>) {
+    pub fn add(&self, device: DeviceRef<T>) {
         match self.devices.write().entry(device.uuid()) {
             Entry::Vacant(entry) => {
                 let device = entry.insert(device);
@@ -56,11 +58,11 @@ impl<T: Device + ?Sized> DeviceRegistry<T> {
         }
     }
 
-    pub fn get(&self, uuid: Uuid) -> Option<Arc<T>> {
+    pub fn get(&self, uuid: Uuid) -> Option<DeviceRef<T>> {
         self.devices.read().get(&uuid).cloned()
     }
 
-    pub fn with_iter<R>(&self, mut func: impl FnMut(Uuid, &Arc<T>) -> Option<R>) -> Option<R> {
+    pub fn with_iter<R>(&self, mut func: impl FnMut(Uuid, DeviceRef<T>) -> Option<R>) -> Option<R> {
         for (&uuid, dev) in self.devices.read().iter() {
             if let Some(result) = func(uuid, dev) {
                 return Some(result);
@@ -69,8 +71,8 @@ impl<T: Device + ?Sized> DeviceRegistry<T> {
         None
     }
 
-    pub fn find(&self, mut func: impl FnMut(&T) -> bool) -> Option<Arc<T>> {
-        self.with_iter(|_, dev| func(dev).then(|| dev.clone()))
+    pub fn find(&self, mut func: impl FnMut(&T) -> bool) -> Option<DeviceRef<T>> {
+        self.with_iter(|_, dev| func(dev).then_some(dev))
     }
 }
 
@@ -155,47 +157,44 @@ impl DeviceResult {
     }
 }
 
-#[derive(Debug)]
-pub struct DeviceOperation(DeviceResult);
+pub trait DeviceFuture : Debug {
+    fn poll(&mut self) -> Option<DeviceResult>;
 
-impl DeviceOperation {
-    pub fn new(result: DeviceResult) -> Self {
-        Self(result)
-    }
-
-    pub fn check(self) -> Result<DeviceResult, Self> {
-        Ok(self.0)
-    }
-
-    pub fn wait(self) -> DeviceResult {
-        self.0
+    fn wait(mut self: Box<Self>) -> DeviceResult {
+        loop {
+            if let Some(result) = self.poll() {
+                return result;
+            }
+        }
     }
 }
 
+pub type DeviceOperation = Box<dyn DeviceFuture>;
+
 pub trait Device : Debug {
-    fn name(&self) -> &str;
-    fn uuid(&self) -> Uuid;
+    fn name(self: DeviceRef<Self>) -> &'static str;
+    fn uuid(self: DeviceRef<Self>) -> Uuid;
 }
 
 pub trait BlockDevice : Device {
     // all methods must be thread safe
 
-    fn block_size_shift(&self) -> u32;
-    fn block_size(&self) -> usize {
+    fn block_size_shift(self: DeviceRef<Self>) -> u32;
+    fn block_size(self: DeviceRef<Self>) -> usize {
         1 << self.block_size_shift()
     }
 
-    fn block_count(&self) -> usize;
+    fn block_count(self: DeviceRef<Self>) -> usize;
 
-    fn max_data_size(&self) -> usize;
+    fn max_data_size(self: DeviceRef<Self>) -> usize;
 
-    fn read(&self, block: usize, data: DeviceTransfer) -> DeviceOperation;
-    fn write(&self, block: usize, data: DeviceTransfer) -> DeviceOperation;
+    fn read(self: DeviceRef<Self>, block: usize, data: DeviceTransfer) -> DeviceOperation;
+    fn write(self: DeviceRef<Self>, block: usize, data: DeviceTransfer) -> DeviceOperation;
 }
 
 pub trait CharacterDevice : Device {
     // all methods must be thread safe
 
-    fn read(&self, data: DeviceTransfer) -> DeviceOperation;
-    fn write(&self, data: DeviceTransfer) -> DeviceOperation;
+    fn read(self: DeviceRef<Self>, data: DeviceTransfer) -> DeviceOperation;
+    fn write(self: DeviceRef<Self>, data: DeviceTransfer) -> DeviceOperation;
 }
