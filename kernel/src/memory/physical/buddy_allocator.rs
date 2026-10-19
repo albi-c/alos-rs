@@ -8,11 +8,9 @@ type PageData = u64;
 const PAGE_DATA_SHIFT: u8 = 6;
 const PAGE_DATA_BITS_SHIFT: u8 = PAGE_DATA_SHIFT + 3;
 const PAGE_DATA_FULL: PageData = !0;
-const PAGE_DATA_SIZE: usize = 1 << PAGE_DATA_SHIFT;
 const PAGE_DATA_MASK: usize = (1 << PAGE_DATA_SHIFT) - 1;
 
 pub struct BuddyAllocator<const N: usize> {
-    data: *mut u8,
     buddies: [&'static mut [PageData]; N],
     page_data_size: usize,
     num_page_data_elements: usize,
@@ -39,7 +37,6 @@ impl<const N: usize> BuddyAllocator<N> {
 
     pub const fn default() -> Self {
         BuddyAllocator {
-            data: 0 as *mut u8,
             buddies: Self::EMPTY_BUDDIES,
             page_data_size: 0,
             num_page_data_elements: 0,
@@ -73,24 +70,25 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         }
 
         let num_pages = end - start;
-        self.page_data_size = (num_pages >> 2) + 1;
+        self.page_data_size = (num_pages >> 2) + 1 + (N << PAGE_DATA_SHIFT);
         self.num_page_data_elements = self.page_data_size >> PAGE_DATA_SHIFT;
     }
     fn data_size(&self) -> usize {
         self.page_data_size
     }
-    fn set_data(&mut self, data: &mut [u8]) {
+    fn set_data(&mut self, data: &'static mut [u8]) {
+        if !self.enabled {
+            return;
+        }
+
         assert!(data.len() >= self.data_size());
-        self.data = data.as_mut_ptr();
-        let mut data = unsafe {
-            core::slice::from_raw_parts_mut(data.as_mut_ptr() as *mut PageData,
-                                            self.num_page_data_elements)
-        };
+        assert!(data.as_mut_ptr().is_aligned_to(align_of::<PageData>()));
+        let mut data = bytemuck::cast_slice_mut(&mut data[..(self.num_page_data_elements << PAGE_DATA_SHIFT)]);
         data.fill(PAGE_DATA_FULL);
 
         for i in 0..N {
             let (buddy, rest) = data.split_at_mut(
-                self.num_page_data_elements >> (i + 1));
+                (self.num_page_data_elements >> (i + 1)) + 1);
             data = rest;
             self.buddies[i] = buddy;
         }
@@ -223,12 +221,6 @@ impl<const N: usize> BuddyAllocator<N> {
             n -= 1;
         }
 
-        // while n >= PAGE_DATA_SIZE {
-        //     self.buddies[level][i >> PAGE_DATA_SHIFT] = overwrite;
-        //     i += PAGE_DATA_SIZE;
-        //     n -= PAGE_DATA_SIZE;
-        // }
-
         let idx = i >> PAGE_DATA_BITS_SHIFT;
         self.buddies[level][idx..idx + (n >> PAGE_DATA_BITS_SHIFT)].fill(overwrite);
         let n1 = n;
@@ -286,5 +278,48 @@ impl<const N: usize> BuddyAllocator<N> {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::prelude::rust_2024::*;
+    use crate::memory::address::PageCount;
+    use crate::memory::physical::allocator::MemoryAllocator;
+    use crate::memory::physical::buddy_allocator::{BuddyAllocator, PageData};
+
+    fn create_test_buddy() -> BuddyAllocator<8> {
+        let mut buddy = BuddyAllocator::<8>::new();
+        buddy.init(0x0, PageCount::new(0x400).size());
+        let data_size = buddy.data_size();
+        let data = Vec::leak(vec![0u8; data_size]);
+        buddy.set_data(data);
+        buddy
+    }
+
+    #[test]
+    fn test_buddy_empty() {
+        let mut buddy = BuddyAllocator::<8>::new();
+        buddy.init(0x0, 0x0);
+        assert_eq!(buddy.page_data_size, 0);
+        assert_eq!(buddy.num_page_data_elements, 0);
+        let data_size = buddy.data_size();
+        assert_eq!(data_size, 0);
+        buddy.set_data(bytemuck::cast_slice_mut::<PageData, _>(&mut []));
+
+        assert_eq!(buddy.alloc_page(), None);
+        assert_eq!(buddy.alloc_pages(PageCount::new(1)), None);
+    }
+
+    #[test]
+    fn test_buddy_full() {
+        let mut buddy = create_test_buddy();
+        assert_eq!(buddy.alloc_pages(PageCount::new(buddy.end_page + 10)), None);
+        assert_eq!(buddy.alloc_pages(PageCount::new(1)), None);
+
+        buddy.include(PageCount::new(10).size(), PageCount::new(20).size());
+        assert_eq!(buddy.alloc_pages(PageCount::new(11)), None);
+        assert!(buddy.alloc_pages(PageCount::new(8)).is_some());
+        assert!(buddy.alloc_page().is_some());
     }
 }

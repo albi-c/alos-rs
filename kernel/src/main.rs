@@ -7,6 +7,8 @@
 #![feature(abi_x86_interrupt)]
 #![feature(step_trait)]
 #![feature(linked_list_cursors)]
+#![feature(pointer_is_aligned_to)]
+#![allow(dead_code)]
 
 extern crate core;
 extern crate alloc;

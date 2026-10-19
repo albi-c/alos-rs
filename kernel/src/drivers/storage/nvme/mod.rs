@@ -14,16 +14,16 @@ struct ControllerCapabilities {
     max_queue_entries: B16,
     contiguous_queues: bool,
     arbitration_mechanism: B2,
-    _reserved1: B5,
+    reserved1: B5,
     timeout: B8,
     doorbell_stride: B4,
     subsystem_reset: bool,
     command_sets: B8,
     boot_partition: bool,
-    _reserved2: B2,
+    reserved2: B2,
     page_size_min: B4,
     page_size_max: B4,
-    _reserved3:  B8
+    reserved3:  B8
 }
 
 impl ControllerCapabilities {
@@ -36,14 +36,14 @@ impl ControllerCapabilities {
 #[derive(Debug, Copy, Clone)]
 struct ControllerConfig {
     enable: bool,
-    _reserved1: B3,
+    reserved1: B3,
     command_set: B3,
     memory_page_size: B4,
     arbitration_mechanism: B3,
     shutdown_notification: B2,
     sq_entry_size: B4,
     cq_entry_size: B4,
-    _reserved2: B8,
+    reserved2: B8,
 }
 
 #[bitfield]
@@ -54,16 +54,16 @@ struct ControllerStatus {
     shutdown: B2,
     subsystem_reset: bool,
     paused: bool,
-    _reserved1: B26,
+    reserved1: B26,
 }
 
 #[bitfield]
 #[derive(Debug, Copy, Clone)]
 struct AdminQueueAttributes {
     sq_size: B12,
-    _reserved1: B4,
+    reserved1: B4,
     cq_size: B12,
-    _reserved2: B4,
+    reserved2: B4,
 }
 
 volatile_struct! { ControllerRegisters;

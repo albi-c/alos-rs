@@ -44,10 +44,10 @@ impl<T: Copy + Debug> Debug for Volatile<T> {
 
 #[macro_export]
 macro_rules! volatile_struct {
-    ($name:ident; $($ident:ident: $ty:ty,)*) => {
+    ($vi:vis $name:ident; $($ident:ident: $ty:ty,)*) => {
         #[derive(Debug, Copy, Clone)]
         #[repr(C)]
-        pub struct $name {
+        $vi struct $name {
             $(pub $ident: crate::volatile::Volatile<$ty>,)*
         }
 

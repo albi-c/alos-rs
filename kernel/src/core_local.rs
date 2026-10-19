@@ -120,7 +120,7 @@ impl<T: CoreLocalItem> CoreLocal<T> {
 
 unsafe impl<T> Sync for CoreLocal<T> {}
 
-trait CoreLocalItem : Sized {
+pub trait CoreLocalItem : Sized {
     fn core_local_read(variable: &CoreLocal<Self>) -> Self;
     fn core_local_write(self, variable: &CoreLocal<Self>);
 }

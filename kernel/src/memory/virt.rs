@@ -2,7 +2,6 @@ use alloc::collections::btree_map::CursorMut;
 use alloc::collections::BTreeMap;
 use core::ops::Bound;
 use crate::memory::address::{PageCount, VirtAddr, VirtAddrPageAligned};
-use crate::println;
 
 #[derive(Debug, Copy, Clone)]
 struct MemoryAllocation {

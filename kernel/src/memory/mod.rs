@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 use core::arch::asm;
 use core::ops::{BitAnd, BitOr, BitOrAssign};
 use limine::request::{ExecutableAddressRequest, HhdmRequest, MemoryMapRequest};
-use crate::{core_local, println};
+use crate::core_local;
 use crate::lock::Lock;
 use crate::memory::address::{PageCount, PhysAddrPageAligned, UserVirtAddr, VirtAddr, VirtAddrPageAligned};
 use crate::memory::physical::buddy_allocator::BuddyAllocator;
@@ -227,7 +227,7 @@ impl MemorySpace {
             return;
         }
         let mut map_lock = self.phys.map();
-        map_lock.iter_present_in_range(virt, virt + count, |entry, addr| {
+        map_lock.iter_present_in_range(virt, virt + count, |entry, _addr| {
             *entry = entry.with_flags(flags.0).present();
         });
     }

@@ -30,7 +30,7 @@ struct Status {
     driver: bool,
     ready: bool,
     features_ok: bool,
-    _reserved: B2,
+    reserved: B2,
     error: bool,
     failed: bool,
 }

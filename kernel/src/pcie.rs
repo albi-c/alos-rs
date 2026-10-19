@@ -8,7 +8,7 @@ use crate::memory::mmio::MMIO;
 
 logger!("PCIe");
 
-volatile_struct! { DeviceHeaderDataGeneral;
+volatile_struct! { pub DeviceHeaderDataGeneral;
     bar: [u32; 6],
     _unused1: [u32; 3],
     capabilities: u8,
@@ -67,11 +67,11 @@ pub struct DeviceCommand {
     pub memory_write_invalidate: bool,
     pub vga_palette_snoop: bool,
     pub parity_error_response: bool,
-    _reserved1: bool,
+    reserved1: bool,
     pub serr_enable: bool,
     pub fast_back_to_back: bool,
     pub interrupt_disable: bool,
-    _reserved2: B5,
+    reserved2: B5,
 }
 
 #[derive(Debug)]
@@ -98,7 +98,7 @@ pub struct DeviceCapabilityPciExpress {
 #[derive(Debug)]
 pub struct DeviceCapabilityMsiXMessageControl {
     pub table_size: B11,
-    _reserved1: B3,
+    reserved1: B3,
     pub function_mask: bool,
     pub enable: bool,
 }
@@ -139,7 +139,7 @@ pub enum DeviceCapability {
     }
 }
 
-volatile_struct! { DeviceHeader;
+volatile_struct! { pub DeviceHeader;
     vendor: u16,
     device: u16,
     command: DeviceCommand,
