@@ -9,6 +9,29 @@ const PAGE_DATA_BITS_SHIFT: u8 = PAGE_DATA_SHIFT + 3;
 const PAGE_DATA_FULL: PageData = !0;
 const PAGE_DATA_MASK: usize = (1 << PAGE_DATA_SHIFT) - 1;
 
+trait PageCountExt : Sized {
+    fn buddy_index(self) -> usize;
+
+    fn buddy_bit_index(self) -> usize;
+
+    #[inline(always)]
+    fn buddy_mask(self) -> PageData {
+        1 << self.buddy_bit_index()
+    }
+}
+
+impl PageCountExt for PageCount {
+    #[inline(always)]
+    fn buddy_index(self) -> usize {
+        self.count() >> PAGE_DATA_BITS_SHIFT
+    }
+
+    #[inline(always)]
+    fn buddy_bit_index(self) -> usize {
+        self.count() & PAGE_DATA_MASK
+    }
+}
+
 pub struct BuddyAllocator<const N: usize> {
     buddies: [&'static mut [PageData]; N],
     page_data_size: usize,
@@ -118,11 +141,11 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         self.last_free = max(self.last_free, end_offset - 1);
 
         for i in start_offset..end_offset {
-            self.alloc_rec_unset(0, i.count());
+            self.alloc_rec_unset(0, i);
         }
 
-        self.alloc_rec_set(0, start_offset.count());
-        self.alloc_rec_set(0, end_offset.count());
+        self.alloc_rec_set(0, start_offset);
+        self.alloc_rec_set(0, end_offset);
     }
 
     fn alloc_page(&mut self) -> Option<PhysAddrPageAligned> {
@@ -132,13 +155,13 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         if self.first_free > self.last_free {
             return None;
         }
-        if !self.alloc_get_set(0, self.first_free.count()) {
+        if !self.alloc_get_set(0, self.first_free) {
             let addr = self.first_free.as_phys_addr();
             self.first_free += PageCount::new(1);
             Some(addr)
         } else {
             for i in self.first_free..=self.last_free {
-                if !self.alloc_get_set(0, i.count()) {
+                if !self.alloc_get_set(0, i) {
                     self.first_free = i + 1;
                     return Some(i.as_phys_addr());
                 }
@@ -151,7 +174,7 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
             return false;
         }
         let page = addr.page_count();
-        self.alloc_set(0, page.count());
+        self.alloc_set(0, page);
         self.first_free = min(self.first_free, page - self.start_page);
         self.last_free = max(self.last_free, page - self.start_page + 1);
         true
@@ -164,11 +187,11 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         // TODO: use buddies
         'outer: for i in self.first_free..=self.last_free.checked_sub(count)? {
             for j in PageCount::new(0)..count {
-                if self.alloc_get(0, (i + j).count()) {
+                if self.alloc_get(0, i + j) {
                     continue 'outer;
                 }
             }
-            self.alloc_set_n(0, i.count(), count.count());
+            self.alloc_set_n(0, i, count);
             if i == self.first_free {
                 self.first_free = i + 1;
             }
@@ -180,12 +203,11 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         if !self.enabled {
             return false;
         }
-        let count = count.count();
         if addr < self.start_page.as_phys_addr() || addr > self.end_page.as_phys_addr() {
             return false;
         }
         let page = addr.page_count();
-        self.alloc_unset_n(0, page.count(), count);
+        self.alloc_unset_n(0, page, count);
         self.first_free = min(self.first_free, page - self.start_page);
         self.last_free = max(self.last_free, page - self.start_page + count);
         true
@@ -194,54 +216,55 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
 
 impl<const N: usize> BuddyAllocator<N> {
     #[inline(always)]
-    fn alloc_get(&mut self, level: usize, i: usize) -> bool {
-        self.buddies[level][i >> PAGE_DATA_BITS_SHIFT] & (1 << (i & PAGE_DATA_MASK)) != 0
+    fn alloc_get(&mut self, level: usize, i: PageCount) -> bool {
+        self.buddies[level][i.buddy_index()] & i.buddy_mask() != 0
     }
 
     #[inline(always)]
-    fn alloc_get_set(&mut self, level: usize, i: usize) -> bool {
-        let bit = 1 << (i & PAGE_DATA_MASK);
-        let el = &mut self.buddies[level][i >> PAGE_DATA_BITS_SHIFT];
+    fn alloc_get_set(&mut self, level: usize, i: PageCount) -> bool {
+        let bit = i.buddy_mask();
+        let el = &mut self.buddies[level][i.buddy_index()];
         let set = (*el & bit) != 0;
         *el |= bit;
         set
     }
 
     #[inline]
-    fn _alloc_modify_n(&mut self, level: usize, mut i: usize, mut n: usize,
-                       start_end: impl Fn(&mut Self, usize, usize) -> (), overwrite: PageData) {
-        while i & PAGE_DATA_MASK != 0 && n > 0 {
+    fn _alloc_modify_n<const OVERWRITE: PageData>(&mut self, level: usize,
+                                                  mut i: PageCount, mut n: PageCount,
+                                                  start_end: impl Fn(&mut Self, usize, PageCount) -> ()) {
+        while i.buddy_bit_index() != 0 && n > 0 {
             start_end(self, level, i);
-            i += 1;
-            n -= 1;
+            i += PageCount::new(1);
+            n -= PageCount::new(1);
         }
 
-        let idx = i >> PAGE_DATA_BITS_SHIFT;
-        self.buddies[level][idx..idx + (n >> PAGE_DATA_BITS_SHIFT)].fill(overwrite);
+        let idx = i.buddy_index();
+        self.buddies[level][idx..idx + n.buddy_index()].fill(OVERWRITE);
         let n1 = n;
-        n &= PAGE_DATA_MASK;
+        let mut n = PageCount::new(n.buddy_bit_index());
         i += n1 - n;
 
         while n > 0 {
             start_end(self, level, i);
-            i += 1;
-            n -= 1;
+            i += PageCount::new(1);
+            n -= PageCount::new(1);
         }
     }
 
     #[inline(always)]
-    fn alloc_set(&mut self, level: usize, i: usize) {
-        self.buddies[level][i >> PAGE_DATA_BITS_SHIFT] |= 1 << (i & PAGE_DATA_MASK);
+    fn alloc_set(&mut self, level: usize, i: PageCount) {
+        self.buddies[level][i.buddy_index()] |= i.buddy_mask();
     }
-    fn alloc_set_n(&mut self, level: usize, i: usize, n: usize) {
-        self._alloc_modify_n(level, i, n, Self::alloc_set, PAGE_DATA_FULL);
+    fn alloc_set_n(&mut self, level: usize, i: PageCount, n: PageCount) {
+        self._alloc_modify_n::<PAGE_DATA_FULL>(level, i, n, Self::alloc_set);
     }
 
-    fn alloc_rec_set(&mut self, level: usize, i: usize) {
+    fn alloc_rec_set(&mut self, level: usize, i: PageCount) {
         self.alloc_set(level, i);
 
         for o in 1..=level {
-            self.alloc_set_n(level - o, i << o, 1 << o);
+            self.alloc_set_n(level - o, i << o, PageCount::new(1) << o);
         }
 
         for o in 1..N-level {
@@ -253,23 +276,23 @@ impl<const N: usize> BuddyAllocator<N> {
     }
 
     #[inline(always)]
-    fn alloc_unset(&mut self, level: usize, i: usize) {
-        self.buddies[level][i >> PAGE_DATA_BITS_SHIFT] &= !(1 << (i & PAGE_DATA_MASK));
+    fn alloc_unset(&mut self, level: usize, i: PageCount) {
+        self.buddies[level][i.buddy_index()] &= !i.buddy_mask();
     }
-    fn alloc_unset_n(&mut self, level: usize, i: usize, n: usize) {
-        self._alloc_modify_n(level, i, n, Self::alloc_unset, 0);
+    fn alloc_unset_n(&mut self, level: usize, i: PageCount, n: PageCount) {
+        self._alloc_modify_n::<0>(level, i, n, Self::alloc_unset);
     }
 
-    fn alloc_rec_unset(&mut self, level: usize, i: usize) {
+    fn alloc_rec_unset(&mut self, level: usize, i: PageCount) {
         self.alloc_unset(level, i);
 
         for o in 1..=level {
-            self.alloc_unset_n(level - o, i << o, 1 << o);
+            self.alloc_unset_n(level - o, i << o, PageCount::new(1) << o);
         }
 
         for o in 1..N-level {
             self.alloc_unset(level + o, i >> o);
-            if self.alloc_get(level + o - 1, (i >> (o - 1)) ^ 1) {
+            if self.alloc_get(level + o - 1, (i >> (o - 1)).xor(1)) {
                 break;
             }
         }

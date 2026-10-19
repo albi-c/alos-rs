@@ -236,6 +236,11 @@ impl PageCount {
     pub fn checked_sub(self, other: Self) -> Option<Self> {
         self.0.checked_sub(other.0).map(Self)
     }
+
+    #[inline(always)]
+    pub fn xor(self, other: usize) -> Self {
+        Self(self.0 ^ other)
+    }
 }
 
 impl Step for PageCount {
@@ -322,7 +327,7 @@ impl PhysAddrPageAligned {
     pub fn hhdm_to_virt(self) -> VirtAddrPageAligned {
         unsafe { VirtAddrPageAligned::new_unchecked(hhdm::add(self.0)) }
     }
-    
+
     pub fn align_down(addr: usize) -> Self {
         Self(page_align_down(addr))
     }
