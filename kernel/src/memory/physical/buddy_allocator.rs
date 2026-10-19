@@ -123,7 +123,7 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         let start = start.page_count();
         let end = end.page_count();
 
-        if end <= start || end < self.start_page || start > self.end_page {
+        if end <= start || end <= self.start_page || start > self.end_page {
             return;
         }
 
@@ -145,7 +145,7 @@ impl<const N: usize> MemoryAllocator for BuddyAllocator<N> {
         }
 
         self.alloc_rec_set(0, start_offset);
-        self.alloc_rec_set(0, end_offset);
+        self.alloc_rec_set(0, end_offset - 1);
     }
 
     fn alloc_page(&mut self) -> Option<PhysAddrPageAligned> {
@@ -326,18 +326,38 @@ mod tests {
         buddy.set_data(bytemuck::cast_slice_mut::<PageData, _>(&mut []));
 
         assert_eq!(buddy.alloc_page(), None);
-        assert_eq!(buddy.alloc_pages(PageCount::new(1)), None);
+        assert_eq!(buddy.alloc_pages(1.into()), None);
     }
 
     #[test]
-    fn test_buddy_full() {
+    fn test_buddy_alloc() {
         let mut buddy = create_test_buddy();
         assert_eq!(buddy.alloc_pages(buddy.end_page + PageCount::new(10)), None);
-        assert_eq!(buddy.alloc_pages(PageCount::new(1)), None);
+        assert_eq!(buddy.alloc_pages(1.into()), None);
 
-        buddy.include(PageCount::new(10).as_phys_addr(), PageCount::new(20).as_phys_addr());
-        assert_eq!(buddy.alloc_pages(PageCount::new(11)), None);
-        assert!(buddy.alloc_pages(PageCount::new(8)).is_some());
+        buddy.include(PageCount::new(0).as_phys_addr(), PageCount::new(10).as_phys_addr());
+
+        assert_eq!(buddy.alloc_pages(9.into()), None);
+
+        let large = buddy.alloc_pages(8.into());
+        assert!(large.is_some());
+        assert_eq!(buddy.alloc_page(), None);
+
+        buddy.dealloc_pages(large.unwrap(), 8.into());
+
+        let large_1 = buddy.alloc_pages(4.into());
+        assert!(large_1.is_some());
         assert!(buddy.alloc_page().is_some());
+        let large_2 = buddy.alloc_pages(3.into());
+        assert!(large_2.is_some());
+        assert_eq!(buddy.alloc_page(), None);
+
+        buddy.dealloc_pages(large_1.unwrap(), 4.into());
+        buddy.dealloc_pages(large_2.unwrap(), 3.into());
+
+        assert_eq!(buddy.alloc_pages(5.into()), None);
+        assert!(buddy.alloc_pages(4.into()).is_some());
+        assert!(buddy.alloc_pages(3.into()).is_some());
+        assert_eq!(buddy.alloc_page(), None);
     }
 }
