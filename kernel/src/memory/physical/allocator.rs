@@ -3,10 +3,10 @@ use crate::memory::address::{PageCount, PhysAddrPageAligned};
 pub trait MemoryAllocator : Send + Sync {
     fn new() -> Self;
 
-    fn init(&mut self, start: usize, end: usize);
+    fn init(&mut self, start: PhysAddrPageAligned, end: PhysAddrPageAligned);
     fn data_size(&self) -> usize;
     fn set_data(&mut self, data: &'static mut [u8]);
-    fn include(&mut self, start: usize, end: usize);
+    fn include(&mut self, start: PhysAddrPageAligned, end: PhysAddrPageAligned);
     
     fn alloc_page(&mut self) -> Option<PhysAddrPageAligned>;
     fn dealloc_page(&mut self, addr: PhysAddrPageAligned) -> bool;

@@ -202,20 +202,20 @@ pub struct PageCount(usize);
 
 impl PageCount {
     #[inline(always)]
-    pub fn as_phys_addr(self) -> PhysAddrPageAligned {
+    pub const fn as_phys_addr(self) -> PhysAddrPageAligned {
         PhysAddrPageAligned(self.size())
     }
     #[inline(always)]
-    pub fn as_virt_addr(self) -> VirtAddrPageAligned {
+    pub const fn as_virt_addr(self) -> VirtAddrPageAligned {
         VirtAddrPageAligned(self.size())
     }
 
     #[inline(always)]
-    pub fn count(self) -> usize {
+    pub const fn count(self) -> usize {
         self.0
     }
     #[inline(always)]
-    pub fn size(self) -> usize {
+    pub const fn size(self) -> usize {
         self.0 << PAGE_SHIFT
     }
 
@@ -224,12 +224,17 @@ impl PageCount {
         is_page_aligned(addr).then_some(PageCount(addr >> PAGE_SHIFT))
     }
     #[inline(always)]
-    pub fn pages_up(addr: usize) -> PageCount {
+    pub const fn pages_up(addr: usize) -> PageCount {
         PageCount(page_count_up(addr))
     }
     #[inline(always)]
-    pub fn pages_down(addr: usize) -> PageCount {
+    pub const fn pages_down(addr: usize) -> PageCount {
         PageCount(page_count_down(addr))
+    }
+
+    #[inline(always)]
+    pub fn checked_sub(self, other: Self) -> Option<Self> {
+        self.0.checked_sub(other.0).map(Self)
     }
 }
 
@@ -316,6 +321,13 @@ impl PhysAddrPageAligned {
 
     pub fn hhdm_to_virt(self) -> VirtAddrPageAligned {
         unsafe { VirtAddrPageAligned::new_unchecked(hhdm::add(self.0)) }
+    }
+    
+    pub fn align_down(addr: usize) -> Self {
+        Self(page_align_down(addr))
+    }
+    pub fn align_up(addr: usize) -> Self {
+        Self(page_align_up(addr))
     }
 }
 
@@ -475,52 +487,52 @@ addr_usize_addr!(UserVirtAddr);
 addr_cmp!(UserVirtAddr);
 
 #[inline(always)]
-pub fn is_page_aligned(addr: usize) -> bool {
+pub const fn is_page_aligned(addr: usize) -> bool {
     addr & PAGE_MASK == 0
 }
 
 #[inline(always)]
-pub fn page_align_up(addr: usize) -> usize {
+pub const fn page_align_up(addr: usize) -> usize {
     (addr + PAGE_MASK) & !PAGE_MASK
 }
 
 #[inline(always)]
-pub fn page_align_down(addr: usize) -> usize {
+pub const fn page_align_down(addr: usize) -> usize {
     addr & !PAGE_MASK
 }
 
 #[inline(always)]
-pub fn page_count_up(addr: usize) -> usize {
+pub const fn page_count_up(addr: usize) -> usize {
     (addr + PAGE_MASK) >> PAGE_SHIFT
 }
 
 #[inline(always)]
-pub fn page_count_down(addr: usize) -> usize {
+pub const fn page_count_down(addr: usize) -> usize {
     addr >> PAGE_SHIFT
 }
 
 #[inline(always)]
-pub fn is_large_page_aligned(addr: usize) -> bool {
+pub const fn is_large_page_aligned(addr: usize) -> bool {
     addr & LARGE_PAGE_MASK == 0
 }
 
 #[inline(always)]
-pub fn large_page_align_up(addr: usize) -> usize {
+pub const fn large_page_align_up(addr: usize) -> usize {
     (addr + LARGE_PAGE_MASK) & !LARGE_PAGE_MASK
 }
 
 #[inline(always)]
-pub fn large_page_align_down(addr: usize) -> usize {
+pub const fn large_page_align_down(addr: usize) -> usize {
     addr & !LARGE_PAGE_MASK
 }
 
 #[inline(always)]
-pub fn large_page_count_up(addr: usize) -> usize {
+pub const fn large_page_count_up(addr: usize) -> usize {
     (addr + LARGE_PAGE_MASK) >> LARGE_PAGE_SHIFT
 }
 
 #[inline(always)]
-pub fn large_page_count_down(addr: usize) -> usize {
+pub const fn large_page_count_down(addr: usize) -> usize {
     addr >> LARGE_PAGE_SHIFT
 }
 

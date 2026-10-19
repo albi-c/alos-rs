@@ -211,8 +211,13 @@ impl<A: MemoryAllocator> MemoryManager<A> {
 
         debug!("Memory end: {}", ByteSize(memory_end));
 
-        self.alloc_32.init(0, min(1 << 32, memory_end));
-        self.alloc_main.init(1 << 32, memory_end);
+        self.alloc_32.init(
+            PhysAddrPageAligned::zero(),
+            min(PhysAddrPageAligned::new(1 << 32).unwrap(),
+                PhysAddrPageAligned::align_down(memory_end)));
+        self.alloc_main.init(
+            PhysAddrPageAligned::new(1 << 32).unwrap(),
+            PhysAddrPageAligned::align_down(memory_end));
 
         let mut allocators = [
             &mut self.alloc_32,
@@ -258,7 +263,9 @@ impl<A: MemoryAllocator> MemoryManager<A> {
                         **entry
                     };
                     for alloc in &mut allocators {
-                        alloc.include(entry.base as usize, (entry.base + entry.length) as usize);
+                        alloc.include(
+                            PhysAddrPageAligned::align_up(entry.base as usize),
+                            PhysAddrPageAligned::align_down((entry.base + entry.length) as usize));
                     }
                     free_mem += entry.length as usize;
                 },
