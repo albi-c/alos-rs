@@ -1,11 +1,11 @@
 // [extern "C" fn(...) -> u64]
 .extern SYSCALL_TABLE
-// usize
+// u32
 .extern SYSCALL_TABLE_LENGTH
 
 .global _syscall_entry
 
-// number in rax
+// number in eax
 // arguments in rdi, rsi, rdx, r10, r8, r9
 _syscall_entry:
 	swapgs
@@ -20,10 +20,11 @@ _syscall_entry:
 	sti
 	cld
 
-	cmp rax, [SYSCALL_TABLE_LENGTH]
+	cmp eax, [rip + SYSCALL_TABLE_LENGTH]
 	jae 0f
 
-    mov rax, [SYSCALL_TABLE + 8 * rax]
+	lea rcx, [rip + SYSCALL_TABLE]
+    mov rax, [rcx + 8 * rax]
     test rax, rax
     jz 0f
 

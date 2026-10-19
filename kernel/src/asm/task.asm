@@ -25,7 +25,7 @@ _task_switch:
 
 	mov [rsi + 0], rsp
 
-	mov r12, [CURRENT_TASK]
+	mov r12, [rip + CURRENT_TASK]
 	mov rsi, [rdi + 56]
 	mov gs:[r12], rsi
 

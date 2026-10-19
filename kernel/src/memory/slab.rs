@@ -77,7 +77,8 @@ pub struct Slabs {
     container: Lock<SlabContainer>,
 }
 
-#[global_allocator]
+#[cfg_attr(test, allow(dead_code))]
+#[cfg_attr(not(test), global_allocator)]
 pub static SLABS: Slabs = Slabs::new();
 
 impl Slabs {

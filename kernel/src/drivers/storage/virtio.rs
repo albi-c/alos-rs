@@ -589,9 +589,6 @@ impl BlkDevice {
 
                 shared.status.store(shared.status_ref.load() as u32, Ordering::SeqCst);
 
-                SLABS.deallocate_physical_one::<RequestHeader>(shared.phys_header);
-                SLABS.deallocate_physical_one::<u8>(shared.phys_status);
-
                 self.queue.free_buffer_group(buf_group);
             },
             None => {
@@ -649,6 +646,9 @@ impl FutureOk {
         let status = self.shared.status.load(Ordering::SeqCst);
         assert_ne!(status, u32::MAX,
                    "virtio-blk: FutureOk::to_result called, but operation is not finished");
+
+        SLABS.deallocate_physical_one::<RequestHeader>(self.shared.phys_header);
+        SLABS.deallocate_physical_one::<u8>(self.shared.phys_status);
 
         let data_size = self.data.size();
         match status {

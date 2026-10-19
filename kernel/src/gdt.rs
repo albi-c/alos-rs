@@ -72,7 +72,7 @@ impl Info {
                 "pushf",
                 "or qword ptr [rsp], 0x200",
                 "push {2}",
-                "lea {0}, [2f]",
+                "lea {0}, [rip + 2f]",
                 "push {0}",
                 "iretq",
                 "2:",

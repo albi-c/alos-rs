@@ -1,7 +1,7 @@
 use core::arch::global_asm;
 use crate::cpu::{msr_read, msr_write};
 use crate::{print, print_char_n, println};
-use crate::memory::address::{align_page_range, PageCount, UserVirtAddr, VirtAddrPageAligned};
+use crate::memory::address::{align_page_range, PageCount, UserVirtAddr};
 use crate::memory::{MemoryFlags, MemorySpace};
 use crate::task::sched_exit;
 
@@ -21,7 +21,7 @@ unsafe extern "C" {
 static mut SYSCALL_TABLE: [u64; 5] = [0; _];
 #[unsafe(no_mangle)]
 #[expect(static_mut_refs)]
-static SYSCALL_TABLE_LENGTH: usize = unsafe { SYSCALL_TABLE.len() };
+static SYSCALL_TABLE_LENGTH: u32 = unsafe { SYSCALL_TABLE.len() as u32 };
 
 extern "C" fn syscall_debug(p1: u64, p2: u64, p3: u64, p4: u64, p5: u64, p6: u64) -> u64 {
     println!("[syscall: debug] {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}", p1, p2, p3, p4, p5, p6);
@@ -60,7 +60,7 @@ extern "C" fn syscall_exit(code: i32) -> ! {
     sched_exit()
 }
 
-extern "C" fn syscall_mmap(req_virt: usize, length: usize, prot: u32, flags: u32, file: i32, offset: isize) -> isize {
+extern "C" fn syscall_mmap(req_virt: usize, length: usize, _prot: u32, _flags: u32, _file: i32, _offset: isize) -> isize {
     let (req_virt, page_count) = align_page_range(req_virt, length);
     let mem_space = MemorySpace::get();
     let virt = mem_space.user_virt_alloc_at_or_after(req_virt, page_count);

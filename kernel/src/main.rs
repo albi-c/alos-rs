@@ -1,5 +1,5 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(negative_impls)]
 #![feature(btree_cursors)]
@@ -30,6 +30,8 @@ mod elf_loader;
 mod pcie;
 mod backtrace;
 mod device;
+
+#[cfg(test)] extern crate std;
 
 use alloc::boxed::Box;
 use compact_str::CompactString;
@@ -208,6 +210,7 @@ fn panic_no_message() -> ! {
     cpu::hcf()
 }
 
+#[cfg_attr(test, allow(dead_code))]
 fn handle_panic(info: &core::panic::PanicInfo) -> ! {
     error!("Panic backtrace:");
     backtrace::print(backtrace_addr_print);
@@ -221,6 +224,7 @@ fn handle_panic(info: &core::panic::PanicInfo) -> ! {
     panic_no_message()
 }
 
+#[cfg(not(test))]
 #[panic_handler]
 fn rust_panic(info: &core::panic::PanicInfo) -> ! {
     handle_panic(info)
