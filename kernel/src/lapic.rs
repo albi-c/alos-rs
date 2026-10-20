@@ -128,6 +128,9 @@ pub fn init() {
     REGS.store(regs.cast().as_ptr(), Ordering::SeqCst);
 
     let regs = Registers::get();
+    regs.write(Reg::TaskPriority, 0);
+    regs.write(Reg::ProcessorPriority, 0);
+    regs.write(Reg::SpuriousInterruptVector, 0x1ff);
     regs.write(Reg::TimerDivideConfiguration, 0b1011);
 
     pit_sleep(pit_prepare_sleep(150));
