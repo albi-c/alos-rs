@@ -301,6 +301,7 @@ impl<const N: usize> BuddyAllocator<N> {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use std::prelude::rust_2024::*;
     use crate::memory::address::{PageCount, PhysAddrPageAligned};
     use crate::memory::physical::allocator::MemoryAllocator;

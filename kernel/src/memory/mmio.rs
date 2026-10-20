@@ -15,6 +15,9 @@ pub struct MMIO {
 impl MMIO {
     pub unsafe fn new(phys: PhysAddrPageAligned, size: PageCount, writable: bool, write_through: bool) -> Self {
         assert!(writable || !write_through, "mmio: memory cannot be both read-only and write-through");
+        if size.count() == 0 {
+            return Self::empty();
+        }
         let virt = MemorySpace::with(|space| {
             let virt = space.virt_alloc(size);
             let mut flags = MemoryFlags::NO_CACHE | MemoryFlags::NO_EXEC;
@@ -31,6 +34,20 @@ impl MMIO {
             base: virt.as_non_null().expect("mmio: virt_alloc returned null"),
             size: size.size(),
         }
+    }
+
+    pub const fn empty() -> Self {
+        Self {
+            base: NonNull::dangling(),
+            size: 0,
+        }
+    }
+
+    pub fn leak(self) -> (NonNull<u8>, usize) {
+        let base = self.base;
+        let size = self.size;
+        core::mem::forget(self);
+        (base, size)
     }
 }
 
@@ -116,6 +133,9 @@ pub unsafe trait VolatileAccess {
 
 impl Drop for MMIO {
     fn drop(&mut self) {
+        if self.size == 0 {
+            return;
+        }
         let virt = VirtAddrPageAligned::new(self.base.addr().into())
             .expect("mmio: base is not page aligned");
         let size = PageCount::try_pages(self.size)

@@ -32,8 +32,7 @@ mod elf_loader;
 mod pcie;
 mod backtrace;
 mod device;
-
-#[cfg(test)] extern crate std;
+mod lapic;
 
 use alloc::boxed::Box;
 use compact_str::CompactString;
@@ -108,9 +107,13 @@ unsafe extern "C" fn kmain() -> ! {
     let memory_values = memory::init();
     core_local::init();
 
+    // TODO: add SMP
+
     // call on all cores when SMP is added
     memory::init_core_local(memory_values);
     gdt::init_core_local();
+
+    lapic::init();
 
     if let Some(file) = EXECUTABLE_FILE_REQUEST.get_response().map(|res| res.file()) {
         backtrace::set_executable(unsafe { core::slice::from_raw_parts(file.addr(), file.size() as usize) });
@@ -194,6 +197,7 @@ extern "C" fn kernel_main_task(msg: Box<CompactString>) -> ! {
                     }
                 }
                 127 => print!("\x08 \x08"),
+                b't' => println!("{}", pit::get_ticks()),
                 _ => print!("{}", ch as char),
             }
         }

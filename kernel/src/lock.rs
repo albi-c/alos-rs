@@ -13,6 +13,13 @@ impl InterruptGuard {
     pub fn release(self) {
         drop(self);
     }
+
+    pub fn with<R>(func: impl FnOnce() -> R) -> R {
+        let guard = Self::new();
+        let value = func();
+        guard.release();
+        value
+    }
 }
 
 impl Drop for InterruptGuard {
@@ -56,7 +63,7 @@ mod inner {
             self.data
         }
     }
-    impl<'a, T> DerefMut for InterruptLockGuard<'a, T> {
+    impl<'a, T: ?Sized> DerefMut for InterruptLockGuard<'a, T> {
         fn deref_mut(&mut self) -> &mut Self::Target {
             self.data
         }
@@ -78,6 +85,13 @@ mod inner {
         }
         pub fn read(&self) -> InterruptLockGuard<'_, T> {
             self.write()
+        }
+
+        pub fn with_write<R>(&self, func: impl FnOnce(&mut T) -> R) -> R {
+            func(&mut self.write())
+        }
+        pub fn with_read<R>(&self, func: impl FnOnce(&T) -> R) -> R {
+            func(&self.read())
         }
 
         pub unsafe fn force_write_unlock(&self) {}
