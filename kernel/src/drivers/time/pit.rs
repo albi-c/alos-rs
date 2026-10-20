@@ -1,5 +1,5 @@
 use core::sync::atomic::{AtomicU64, Ordering};
-use crate::{const_port, interrupts, lapic, task};
+use crate::{const_port, interrupts};
 use crate::interrupts::IrqContext;
 
 // 1/x seconds
@@ -17,8 +17,6 @@ const_port!(PORT: 0x40, 4);
 
 fn interrupt_handler(_ctx: IrqContext) {
     TICKS.fetch_add(1, Ordering::SeqCst);
-    lapic::eoi();
-    task::time_tick();
 }
 
 pub fn init() {
@@ -30,12 +28,6 @@ pub fn init() {
     PORT.out_b(0, (DIVISOR >> 8) as u8);
     
     TICKS.store(0, Ordering::SeqCst);
-}
-
-pub fn disable() {
-    PORT.out_b(3, 0b00110100);
-    PORT.out_b(0, 0);
-    PORT.out_b(0, 0);
 }
 
 #[inline(always)]

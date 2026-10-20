@@ -1,7 +1,7 @@
 use core::arch::x86_64::__cpuid;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicPtr, Ordering};
-use crate::cpu;
+use crate::{cpu, interrupts, task};
 use crate::drivers::time::pit;
 use crate::lock::InterruptGuard;
 use crate::memory::address::PhysAddrPageAligned;
@@ -12,6 +12,8 @@ const MSR_APIC_BASE: u32 = 0x0000_001b;
 
 const LVT_MASKED: u32 = 1 << 16;
 const LVT_TIMER_PERIODIC: u32 = 1 << 17;
+
+const TIMER_IRQ: u8 = 0x30;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u32)]
@@ -107,6 +109,12 @@ fn measure_ticks_per_pit(regs: Registers, wait: u32) -> u32 {
     (u32::MAX - regs.read(Reg::TimerCurrentCount)) / wait
 }
 
+fn interrupt_handler(ctx: interrupts::IrqContext) {
+    let _allow_context_switch = ctx.flags & 0x200 != 0;
+    eoi();
+    task::time_tick();
+}
+
 pub fn init() {
     if __cpuid(CPUID_LEAF).edx & (1 << 9) == 0 {
         panic!("Local APIC is not supported");
@@ -130,10 +138,11 @@ pub fn init() {
     let ticks = measurements[4].midpoint(measurements[5]);
 
     InterruptGuard::with(|| {
+        interrupts::attach_irq(TIMER_IRQ, interrupt_handler);
+
         regs.write(Reg::TimerDivideConfiguration, 0b1011);
-        regs.write(Reg::LvtTimer, 0x20 | LVT_TIMER_PERIODIC);
+        regs.write(Reg::LvtTimer, TIMER_IRQ as u32 | LVT_TIMER_PERIODIC);
         regs.write(Reg::TimerInitialCount, ticks);
-        pit::disable();
     });
 }
 
