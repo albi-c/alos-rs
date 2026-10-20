@@ -105,7 +105,9 @@ pub fn init() {
         panic!("Local APIC is not supported");
     }
 
-    let base = cpu::msr_read(MSR_APIC_BASE) & !0x1000_0000_0000_0fff;
+    let msr = cpu::msr_read(MSR_APIC_BASE);
+    cpu::msr_write(MSR_APIC_BASE, msr | 1 << 11);
+    let base = msr & !0x1000_0000_0000_0fff;
     let mmio = unsafe { MMIO::new(
         PhysAddrPageAligned::new(base as usize).unwrap(),
         1.into(), true, false) };

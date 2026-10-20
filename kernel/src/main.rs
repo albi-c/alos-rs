@@ -66,13 +66,52 @@ static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
 logger!("Kernel");
 
+const EXCEPTION_NAMES: [&'static str; 32] = [
+    "division error",
+    "debug",
+    "non-maskable interrupt",
+    "breakpoint",
+    "overflow",
+    "bound range exceeded",
+    "invalid opcode",
+    "device not available",
+    "double fault",
+    "coprocessor segment overrun",
+    "invalid tss",
+    "segment not present",
+    "stack segment fault",
+    "general protection fault",
+    "page fault",
+    "?",
+    "x87 floating point exception",
+    "alignment check",
+    "machine check",
+    "simd floating point exception",
+    "virtualization exception",
+    "control protection exception",
+    "?", "?", "?", "?", "?", "?",
+    "hypervisor injection exception",
+    "vmm communication exception",
+    "security exception",
+    "?",
+];
+
 fn backtrace_addr_print(ip: usize) {
     error!("  0x{:016x}", ip);
 }
 
+fn print_exception(ctx: interrupts::ExcContext, user: bool) {
+    let name = EXCEPTION_NAMES.get(ctx.exc as usize)
+        .map(|name| *name).unwrap_or("? (code >= 32)");
+    error!("{} exception: {}", if user { "User" } else { "Kernel" }, name);
+    error!("  Error: {:#x}, Address: {:#x}", ctx.error, ctx.address);
+    error!("  Instruction: {:#x}, Flags: {:#x}", ctx.instruction, ctx.flags);
+    error!("  Stack pointer: {:#x}, Base pointer: {:#x}", ctx.sp, ctx.bp);
+}
+
 fn exception_handler(ctx: interrupts::ExcContext) {
     if ctx.user {
-        warning!("User exception: {:#x?}", ctx);
+        print_exception(ctx, true);
         panic!("User exception");
     } else {
         error!("Kernel exception backtrace:");
@@ -82,7 +121,7 @@ fn exception_handler(ctx: interrupts::ExcContext) {
             error!("Double fault backtrace:");
             backtrace::print_from(backtrace_addr_print, ctx.bp, ctx.sp, ctx.address);
         }
-        error!("Kernel exception: {:#x?}", ctx);
+        print_exception(ctx, false);
         panic_no_message();
     }
 }
