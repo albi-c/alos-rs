@@ -42,7 +42,6 @@ use crate::memory::MemorySpace;
 use crate::task::{Task, sched_yield};
 use alloc::boxed::Box;
 use compact_str::CompactString;
-use drivers::time::pit;
 use limine::BaseRevision;
 use limine::request::{ExecutableFileRequest, FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 
@@ -104,7 +103,6 @@ unsafe extern "C" fn kmain() -> ! {
         interrupts::attach_exc(i, exception_handler, true);
     }
 
-    pit::init();
     let memory_values = memory::init();
     core_local::init();
 
@@ -198,7 +196,7 @@ extern "C" fn kernel_main_task(msg: Box<CompactString>) -> ! {
                     }
                 }
                 127 => print!("\x08 \x08"),
-                b't' => println!("{}", pit::get_ticks()),
+                b't' => println!("{}", clock::tsc::get_ns() / 1_000_000),
                 _ => print!("{}", ch as char),
             }
         }

@@ -11,8 +11,18 @@ static FREQUENCY: AtomicU64 = AtomicU64::new(0);
 static FS_PER_TICK: AtomicU64 = AtomicU64::new(0);
 
 #[inline(always)]
-pub fn get() -> u64 {
+pub fn get_ticks() -> u64 {
     unsafe { _rdtsc() }
+}
+
+#[inline(always)]
+pub fn ticks_to_ns(ticks: u64) -> u64 {
+    (ticks as u128 * get_femtoseconds_per_tick() as u128 / 1_000_000) as u64
+}
+
+#[inline(always)]
+pub fn get_ns() -> u64 {
+    ticks_to_ns(get_ticks())
 }
 
 #[inline(always)]
@@ -27,9 +37,9 @@ pub fn get_femtoseconds_per_tick() -> u64 {
 
 #[inline]
 pub fn wait_ns(ns: u64) {
-    let start = get();
+    let start = get_ticks();
     let ticks = ns * 1_000_000 / get_femtoseconds_per_tick();
-    while get() < start + ticks {
+    while get_ticks() < start + ticks {
         spin_loop();
     }
 }
@@ -45,14 +55,14 @@ pub fn init(hpet: &HPET) {
     debug!("waiting {hpet_ticks_wait} HPET ticks for calibration");
 
     let (diff, diff_hpet) = InterruptGuard::with(|| {
-        let start = get();
+        let start = get_ticks();
         let start_hpet = hpet.get_ticks();
 
         while hpet.get_ticks() < start_hpet + hpet_ticks_wait {
             spin_loop();
         }
 
-        let end = get();
+        let end = get_ticks();
         let end_hpet = hpet.get_ticks();
 
         (end - start, end_hpet - start_hpet)
