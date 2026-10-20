@@ -1,8 +1,7 @@
 use core::arch::x86_64::__cpuid;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicPtr, Ordering};
-use crate::{cpu, interrupts, task};
-use crate::drivers::time::pit;
+use crate::{clock, cpu, interrupts, task};
 use crate::lock::InterruptGuard;
 use crate::memory::address::PhysAddrPageAligned;
 use crate::memory::mmio::MMIO;
@@ -13,7 +12,7 @@ const MSR_APIC_BASE: u32 = 0x0000_001b;
 const LVT_MASKED: u32 = 1 << 16;
 const LVT_TIMER_PERIODIC: u32 = 1 << 17;
 
-const TIMER_IRQ: u8 = 0x30;
+const TIMER_IRQ: u8 = 0x40;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u32)]
@@ -89,30 +88,16 @@ impl Registers {
     }
 }
 
-fn pit_prepare_sleep(ticks: u64) -> u64 {
-    let start_tick = pit::get_ticks() + 2;
-    let end_tick = start_tick + ticks;
-    while pit::get_ticks() < start_tick {}
-    end_tick
-}
-
-fn pit_sleep(end: u64) {
-    while pit::get_ticks() < end {}
-}
-
-fn measure_ticks_per_pit(regs: Registers, wait: u32) -> u32 {
-    let end = pit_prepare_sleep(wait as u64);
-    regs.write(Reg::TimerInitialCount, u32::MAX);
-    pit_sleep(end);
-    regs.write(Reg::LvtTimer, LVT_MASKED);
-
-    (u32::MAX - regs.read(Reg::TimerCurrentCount)) / wait
-}
-
 fn interrupt_handler(ctx: interrupts::IrqContext) {
     let _allow_context_switch = ctx.flags & 0x200 != 0;
     eoi();
     task::time_tick();
+}
+
+fn measure_ticks_per_ms(regs: Registers) -> u32 {
+    regs.write(Reg::TimerInitialCount, u32::MAX);
+    clock::tsc::wait_ns(1_000_000);
+    u32::MAX - regs.read(Reg::TimerCurrentCount)
 }
 
 pub fn init() {
@@ -128,17 +113,13 @@ pub fn init() {
     REGS.store(regs.cast().as_ptr(), Ordering::SeqCst);
 
     let regs = Registers::get();
+    regs.write(Reg::LvtTimer, LVT_MASKED);
     regs.write(Reg::TaskPriority, 0);
     regs.write(Reg::ProcessorPriority, 0);
-    regs.write(Reg::SpuriousInterruptVector, 0x1ff);
     regs.write(Reg::TimerDivideConfiguration, 0b1011);
+    regs.write(Reg::SpuriousInterruptVector, 0x1ff);
 
-    pit_sleep(pit_prepare_sleep(150));
-
-    let mut measurements: [u32; 10] = core::array::from_fn(
-        |_| measure_ticks_per_pit(regs, 5));
-    measurements.sort_unstable();
-    let ticks = measurements[4].midpoint(measurements[5]);
+    let ticks = measure_ticks_per_ms(regs);
 
     InterruptGuard::with(|| {
         interrupts::attach_irq(TIMER_IRQ, interrupt_handler);

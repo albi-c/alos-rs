@@ -1,5 +1,5 @@
 use core::cmp::max;
-use acpi::{AcpiTables, Handle, Handler, PciAddress, PhysicalMapping};
+use acpi::{AcpiTables, Handle, Handler, HpetInfo, PciAddress, PhysicalMapping};
 use acpi::aml::AmlError;
 use acpi::platform::PciConfigRegions;
 use limine::request::RsdpRequest;
@@ -22,6 +22,10 @@ pub struct Tables(AcpiTables<MemoryHandler>);
 impl Tables {
     pub fn get_pci_regions(&self) -> Option<PciConfigRegions> {
         PciConfigRegions::new(&self.0).ok()
+    }
+
+    pub fn get_hpet(&self) -> Option<HpetInfo> {
+        HpetInfo::new(&self.0).ok()
     }
 }
 

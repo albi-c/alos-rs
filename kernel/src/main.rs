@@ -10,8 +10,8 @@
 #![feature(pointer_is_aligned_to)]
 #![allow(dead_code)]
 
-extern crate core;
 extern crate alloc;
+extern crate core;
 
 mod drivers;
 mod ports;
@@ -33,17 +33,18 @@ mod pcie;
 mod backtrace;
 mod device;
 mod lapic;
+pub mod clock;
 
-use alloc::boxed::Box;
-use compact_str::CompactString;
-use limine::BaseRevision;
-use limine::request::{ExecutableFileRequest, FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
-use drivers::time::pit;
-use crate::device::{DeviceTransfer, BLOCK_DEVICE_REGISTRY};
+use crate::device::{BLOCK_DEVICE_REGISTRY, DeviceTransfer};
 use crate::drivers::serial;
 use crate::elf_loader::ElfError;
 use crate::memory::MemorySpace;
-use crate::task::{sched_yield, Task};
+use crate::task::{Task, sched_yield};
+use alloc::boxed::Box;
+use compact_str::CompactString;
+use drivers::time::pit;
+use limine::BaseRevision;
+use limine::request::{ExecutableFileRequest, FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -113,8 +114,6 @@ unsafe extern "C" fn kmain() -> ! {
     memory::init_core_local(memory_values);
     gdt::init_core_local();
 
-    lapic::init();
-
     if let Some(file) = EXECUTABLE_FILE_REQUEST.get_response().map(|res| res.file()) {
         backtrace::set_executable(unsafe { core::slice::from_raw_parts(file.addr(), file.size() as usize) });
     } else {
@@ -122,6 +121,8 @@ unsafe extern "C" fn kmain() -> ! {
     }
 
     let acpi_tables = acpi::init();
+    clock::init_with_acpi(&acpi_tables);
+    lapic::init();
     pcie::init(&acpi_tables);
 
     syscall::init();
