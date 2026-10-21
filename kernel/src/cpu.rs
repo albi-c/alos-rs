@@ -1,5 +1,6 @@
 use core::arch::asm;
 use core::sync::atomic::{compiler_fence, Ordering};
+use crate::memory::address::VirtAddrPageAligned;
 
 #[inline(always)]
 pub fn query_interrupts() -> bool {
@@ -88,6 +89,17 @@ pub fn msr_write(msr: u32, val: u64) {
             in("ecx") msr,
             in("eax") eax,
             in("edx") edx,
+            options(nomem, nostack),
+        )
+    }
+}
+
+#[inline(always)]
+pub fn invalidate_page_table(addr: VirtAddrPageAligned) {
+    unsafe {
+        asm!(
+            "invlpg [{0}]",
+            in(reg) addr.addr(),
             options(nomem, nostack),
         )
     }
